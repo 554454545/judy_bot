@@ -146,6 +146,10 @@ tests/background/real-herdr-execution.py
 
 首次业务执行形成原生 rollout 后，`execution/codex.py` 使用安装版 Codex 0.160.0 的 [官方 `thread/name/set`](https://learn.chatgpt.com/docs/app-server) 命名。临时 stdio 客户端只读取摘要、设置已核对 UUID 的名字并回读，不 start/resume/turn，不向 TUI 输入 `/rename`，不改写原生 SQLite。完成或失败均关闭该临时客户端，保留 Herdr 中的原 TUI。
 
+首次启动收据返回后若状态暂为 unknown，`herdr.py` 使用原生 `agent wait` 等待，再核对同一 name/workspace/pane、Agent 类型和 cwd。启动检测与状态等待共用 90 秒预算；blocked、working、身份变化或等待超时明确失败，保留现有 Agent 和证据。复用失败首次绑定时也核对原 Agent，等待只针对 unknown，不重新启动客户端。
+
+Bot 根目录 [resume-codex.sh](../../../resume-codex.sh) 汇总正式登记的 Codex 项目及后台目录内的历史原生会话，默认显示全部并按编号恢复；`./resume-codex.sh --list` 只查看。列表保留各自 CODEX_HOME，显示真实 UUID、名称和客户端占用；已登记但无原生会话的项目单独标明，不创建会话。选择时恢复实际 UUID 和工作目录，不迁移历史或强行释放已有写锁。
+
 启动和恢复都显式使用登记的模型、思考强度、Fast 参数及 [额度模型切换提醒开关](https://learn.chatgpt.com/docs/config-file/config-reference) `notice.hide_rate_limit_model_nudge=true`，避免提醒弹窗接收自动输入。`herdr-evidence.json.native_model_settings` 记录本次原生 `turn_context` 的实际模型与思考强度；不符合登记则 blocked，不以默认配置冒充实际调用。提示关闭不改变额度或网络重试策略。
 
 输入仍为 spec.json 与 prompt.md。独立测试直接提供真实任务文件，不调用前台登记接口，不制造 TG update、Pi user entry 或原话证据。每次执行保存交接文件原字节及 hash，再生成本次 dispatch-prompt；通过 subprocess 参数数组发送文件内容，不做 Shell 字符串拼接。原登记和原交接文件不被执行阶段覆盖。
