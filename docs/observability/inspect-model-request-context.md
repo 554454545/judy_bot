@@ -68,7 +68,9 @@
 
 后台报告不走普通 TG 提问的最终发送函数。先按真实 `taskId/runId` 查对应登记根目录的 `runs/<task>/<run>/final-report-receipt.json.observability`：`source` 是不可变原始 TG 身份，`sourceRecordFile` 是原始派发 session 的观测文件，`reviewSegments` 指向各验收 session 的观测文件。前台 `/pi_new` 后仍按这些引用查证，不能只读当前 session。
 
-`observability.prepared.summary.requestIds` 是显示数字实际累计的请求集合。逐个到上述 JSONL 查 `request/response` 与原始 `response.accounting.providerRawUsage`；验收请求带有匹配的 `backgroundTask.taskId/runId/reviewId`，不通过正文关键词匹配。统计范围是原始 TG 派发回合加该 run 的主 Pi 验收请求；Coding Agent、记忆和压缩调用另查各自记录。ctx 取最后一个验收请求，初次派发回复的页脚不能代替最终报告累计用量。
+`originSources` 保存任务明确绑定的初始问题、确认及后续需求修订所对应的 TG 回合和观测文件；旧记录没有该字段时仅包含 `source` 的回合。无关聊天不能计入。最终耗时仍从最初问题起算，不能被确认消息的时间覆盖。
+
+`observability.prepared.summary.requestIds` 是显示数字实际累计的请求集合。逐个到上述 JSONL 查 `request/response` 与原始 `response.accounting.providerRawUsage`；验收请求带有匹配的 `backgroundTask.taskId/runId/reviewId`，不通过正文关键词匹配。统计范围是任务绑定的 TG 原话回合加该 run 的主 Pi 验收请求；Coding Agent、记忆和压缩调用另查各自记录。跨 session 查证并按 requestId 去重；任一原话回合缺少证据时累计用量保持未知。ctx 取最后一个验收请求，初次派发回复的页脚不能代替最终报告累计用量。
 
 最终界面值读 `observability.prepared.summary` 或 `background_footer_prepared.summary`；实际 API 确认时间读 `background_delivery_end.confirmedTiming`，来源不是手机回执。时间检查同时核对 Telegram HTTP Date 校准、Linux boot_id、单调接收/准备/发送确认锚点。缺证据保持未知，不拿 WSL 本地墙钟直接减 TG 发送时间。准备后重试不重算界面值；确认日志仍记录实际最终耗时。
 

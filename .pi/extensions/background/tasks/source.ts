@@ -1,4 +1,4 @@
-// 任务原话取证：绑定真实 TG/Pi 用户消息，bash 执行前保存非上下文 session entry；task_protocol.py 通过 Pi 原生会话环境读取。
+// 任务原话取证：绑定真实 TG/Pi 用户消息，bash 前和回合结束保存非上下文条目；task_protocol.py 通过 Pi 原生会话环境读取。
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // 项目自定义事件，由 telegram-turn/index.ts 的既有出队观察点发送，不是 Pi 内置事件。
@@ -151,10 +151,7 @@ export function createOriginalRequestCapture(pi: ExtensionAPI) {
 // 用户要求的原话记录适配：沿用 Joye appendEntry/getBranch 原则，不改变 bash 参数，也不增加模型工具或消息。
 export function registerOriginalRequestEvidence(pi: ExtensionAPI) {
   const capture = createOriginalRequestCapture(pi);
-  pi.on("tool_call", (event, ctx) => {
-    if (event.toolName !== "bash") {
-      return;
-    }
+  const save = (ctx: ExtensionContext) => {
     const branch = ctx.sessionManager.getBranch();
     const user = branch.findLast(entry => entry.type === "message" && entry.message.role === "user");
     if (!user) {
@@ -178,5 +175,12 @@ export function registerOriginalRequestEvidence(pi: ExtensionAPI) {
       };
     }
     pi.appendEntry(REQUEST_ENTRY_TYPE, data);
+  };
+  pi.on("tool_call", (event, ctx) => {
+    if (event.toolName === "bash") {
+      save(ctx);
+    }
   });
+  // 只问澄清、不调用 bash 的回合也要保留来源；重试同一 user entry 不重复保存。
+  pi.on("agent_end", (_event, ctx) => save(ctx));
 }

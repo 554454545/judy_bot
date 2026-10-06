@@ -1,6 +1,10 @@
 {
-  "_comment": "Codex 默认模型、思考强度和服务等级；execution/settings.py 读取，execution/codex.py 转为项目原生 config.toml。调用方明确指定的参数优先。",
+  "_comment": "Codex 新项目默认配置；settings.py 解析运行路径，codex.py 生成原生配置。相对路径按 Bot 根目录解释，home 支持 {projectId}；binary 使用既有可执行程序。已有项目保留登记参数。",
   "model": "gpt-6.1-sol",
   "reasoningEffort": "low",
-  "serviceTier": "fast"
+  "serviceTier": "fast",
+  "binary": "codex",
+  "home": ".pi/agent/background/codex/{projectId}",
+  "authFile": ".pi/agent/auth.json",
+  "baseUrl": "https://chatgpt.com/backend-api/codex"
 }

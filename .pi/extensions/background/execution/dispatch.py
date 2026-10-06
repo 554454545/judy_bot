@@ -1,13 +1,96 @@
 # 前后台交接：task_protocol.py 的 run 通过项目 Herdr 真实 Shell 启动 runner.py；异步返回收据，result 只返回摘要与证据路径。
 import copy
+import fcntl
 import json
+import os
 import shlex
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 from execution import runner
 from storage.registry import ident, timestamp, transaction
+
+
+def bind_project(root, project_id, overrides=None):
+    # 复用运行任务的真实 Shell；前台不自行选择 pane，不伪造 HERDR_ENV。
+    from execution import service, settings as agent_settings
+    root = Path(root).resolve()
+    project_id = ident(project_id)
+    directory = root / "bindings" / project_id
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (directory / "operation.lock").open("a+") as lock:
+        os.chmod(lock.name, 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("该项目正在绑定；先查询登记，不重复启动") from error
+        with transaction(root) as registry:
+            project = copy.deepcopy(registry["projects"][project_id])
+        previous = project.get("executionSettings") or {}
+        settings = {
+            **service.SETTINGS,
+            **previous,
+            **(overrides or {}),
+        }
+        if any(settings[key] != value for key, value in service.SETTINGS.items()):
+            raise ValueError("首次绑定只使用 Bot 常驻服务管理的 Herdr；不能将 runtime pane 发往另一实例")
+        settings["agent"] = agent_settings.runtime_options(project, {
+            **previous.get("agent", {}),
+            **(overrides or {}).get("agent", {}),
+        })
+        pending = runner.read(directory / "pending.json", {})
+        receipt = runner.read(pending.get("receipt"), {}) if pending else {}
+        if pending and not receipt:
+            return {
+                "projectId": project_id,
+                "state": "binding",
+                "receipt": pending["receipt"],
+                "note": "先查询此收据；未知启动不能重发",
+            }
+        pane = service.runtime_pane(root)
+        attempt = directory / str(uuid.uuid4())
+        attempt.mkdir(mode=0o700)
+        runner.atomic_json(attempt / "project.json", project)
+        runner.atomic_json(attempt / "settings.json", settings)
+        receipt_path = attempt / "receipt.json"
+        runner.atomic_json(directory / "pending.json", {
+            "receipt": str(receipt_path),
+            "at": timestamp(),
+        })
+        command = shlex.join([
+            "nohup", sys.executable, str(Path(__file__).with_name("runner.py").resolve()),
+            "--root", str(root), "bind", "--project", str(attempt / "project.json"),
+            "--settings", str(attempt / "settings.json"), "--receipt", str(receipt_path),
+        ])
+        command += " > " + shlex.quote(str(attempt / "stdout.json")) + " 2> " + shlex.quote(str(attempt / "stderr.log")) + " < /dev/null &"
+        accepted = control(settings, "pane", "run", pane["pane_id"], command)
+        runner.atomic_json(attempt / "herdr-receipt.json", accepted)
+        deadline = time.monotonic() + 110
+        while time.monotonic() < deadline:
+            receipt = runner.read(receipt_path, {})
+            if receipt:
+                if receipt["state"] == "failed":
+                    raise ValueError("项目绑定失败：" + receipt["error"] + "；证据：" + str(attempt))
+                with transaction(root) as registry:
+                    bound = registry["projects"][project_id]
+                    return {
+                        "projectId": project_id,
+                        "state": "ready",
+                        "agentName": bound["herdr"]["agent_name"],
+                        "sessionId": bound.get("sessionId"),
+                        "reused": receipt["reused"],
+                        "receipt": str(receipt_path),
+                    }
+            time.sleep(0.2)
+        return {
+            "projectId": project_id,
+            "state": "binding",
+            "receipt": str(receipt_path),
+            "note": "尚无完成证据，不自动重新创建 Agent",
+        }
 
 
 def control(settings, *arguments):

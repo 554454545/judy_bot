@@ -183,9 +183,13 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
     const responses = new Map<string, any>();
     const toolIds = new Set<string>();
     const segments = metadata.reviewSegments ?? [];
-    const files = [...new Set<string>([metadata.sourceRecordFile, ...segments.map((item: any) => item.recordFile)].filter(Boolean))];
-    let completeEvidence = Boolean(metadata.sourceRecordFile);
-    let sourceMatched = false;
+    const origins = metadata.originSources ?? [{
+      ...metadata.source,
+      recordFile: metadata.sourceRecordFile,
+    }];
+    const files = [...new Set<string>([...origins.map((item: any) => item.recordFile), ...segments.map((item: any) => item.recordFile)].filter(Boolean))];
+    let completeEvidence = origins.every((item: any) => Boolean(item.recordFile));
+    const matchedSources = new Set<any>();
     let dispatchReplyMs: number | null = null;
     let last: any;
     for (const file of files) {
@@ -194,27 +198,30 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
           throw new Error("Observation file is outside this Pi observation directory");
         }
         for await (const entry of statisticsEntries(file)) {
-          const origin = file === metadata.sourceRecordFile && entry.sessionId === metadata.source?.sessionId
-            && entry.telegramTurnId === metadata.source?.telegramTurnId && !entry.backgroundTask;
+          const origin = !entry.backgroundTask && origins.find((item: any) => file === item.recordFile
+            && entry.sessionId === item.sessionId && entry.telegramTurnId === item.telegramTurnId);
           const review = entry.backgroundTask?.taskId === metadata.taskId
             && entry.backgroundTask?.runId === metadata.runId
             && segments.some((segment: any) => segment.reviewId === entry.backgroundTask.reviewId
               && segment.recordFile === file && segment.sessionId === entry.sessionId);
           if (origin && entry.stage === "telegram_turn_start"
-              && entry.chatId === metadata.source.chatId
-              && entry.sourceMessageIds?.includes(metadata.source.messageId)
-              && Date.parse(entry.sentAt) === Date.parse(metadata.source.sentAt)) {
-            sourceMatched = true;
-            metadata.sourceClock = {
-              ...entry.clockAnchor,
-              serverCalibrated: Number.isFinite(Date.parse(entry.receivedServerEstimatedAt ?? "")),
-              senderToBotEstimateMs: entry.senderToBotEstimateMs,
-            };
+              && entry.chatId === origin.chatId
+              && entry.sourceMessageIds?.includes(origin.messageId)
+              && Date.parse(entry.sentAt) === Date.parse(origin.sentAt)) {
+            matchedSources.add(origin);
+            // 最终耗时从最初问题开始，后续确认不能覆盖这个起点。
+            if (origin.sessionId === metadata.source.sessionId && origin.telegramTurnId === metadata.source.telegramTurnId) {
+              metadata.sourceClock = {
+                ...entry.clockAnchor,
+                serverCalibrated: Number.isFinite(Date.parse(entry.receivedServerEstimatedAt ?? "")),
+                senderToBotEstimateMs: entry.senderToBotEstimateMs,
+              };
+            }
           }
           if (!origin && !review) {
             continue;
           }
-          if (origin && entry.stage === "telegram_turn_end" && entry.status === "delivered") {
+          if (origin === origins.at(-1) && entry.stage === "telegram_turn_end" && entry.status === "delivered") {
             dispatchReplyMs = entry.summary?.elapsedMs ?? null;
           }
           if (entry.stage === "request") {
@@ -246,8 +253,8 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
         } : undefined),
       };
     }));
-    usage.scope = "originating Telegram dispatch turn + this task/run's main Pi review requests; excludes Coding Agent, memory and compaction";
-    completeEvidence &&= sourceMatched && segments.length > 0 && Boolean(last)
+    usage.scope = "selected originating Telegram turns + this task/run's main Pi review requests; excludes Coding Agent, memory and compaction";
+    completeEvidence &&= matchedSources.size === origins.length && segments.length > 0 && Boolean(last)
       && [...requests.keys()].every(id => responses.has(id));
     if (!completeEvidence) {
       usage.uncachedInput = null;
@@ -292,7 +299,7 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
         reviewPreparationMs: segments.length === 1 && segments[0].bootId === bootId
           ? monotonicDuration(segments[0].monotonicNs, boundaryNs.toString())
           : null,
-        scope: "dispatch includes initial reply API confirmation; Coding Agent is actual Herdr dispatch/wait; review includes report preparation; ranges may overlap, do not sum",
+        scope: "dispatch is the final selected originating turn including its reply API confirmation; Coding Agent is actual Herdr dispatch/wait; review includes report preparation; ranges may overlap, do not sum",
       },
     };
   }
@@ -478,17 +485,48 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
         throw new Error("Background observation identity changed");
       }
       const file = recordPath?.(ctx);
-      const matches = file && source.sessionId
-        ? readdirSync(path.dirname(file)).filter(name => name.endsWith(`_${source.sessionId}.jsonl`))
-        : [];
+      const observationFiles = file ? readdirSync(path.dirname(file)) : [];
+      const seen = new Set<string>();
+      const originSources = [original, ...(task.clarificationRequests ?? []), ...(task.revisions ?? []).map((item: any) => item.request)]
+        .filter(Boolean)
+        .map((item: any) => ({
+          sessionId: item.sessionId,
+          telegramTurnId: item.telegram?.turnId,
+          messageId: item.telegram?.messageId,
+          chatId: item.telegram?.chatId,
+          sentAt: item.telegram?.sentAt,
+        }))
+        .filter((item: any) => {
+          const key = `${item.sessionId}:${item.telegramTurnId}`;
+          if (seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        })
+        .map((item: any) => {
+          const matches = item.sessionId
+            ? observationFiles.filter(name => name.endsWith(`_${item.sessionId}.jsonl`))
+            : [];
+          return {
+            ...item,
+            recordFile: matches.length === 1 ? path.join(path.dirname(file!), matches[0]) : null,
+          };
+        });
+      const sourceIdentities = (items: any[]) => items.map(({ recordFile, ...item }) => item);
+      if (previous?.originSources && JSON.stringify(sourceIdentities(previous.originSources)) !== JSON.stringify(sourceIdentities(originSources))) {
+        throw new Error("Background originating turns changed");
+      }
       const metadata = previous ?? {
         taskId: identity.taskId,
         runId: identity.runId,
         source,
-        sourceRecordFile: matches.length === 1 ? path.join(path.dirname(file!), matches[0]) : null,
+        sourceRecordFile: originSources[0]?.recordFile ?? null,
         reviewSegments: [],
       };
       if (!metadata.prepared) {
+        // 已保存的引用不随文件缺失或重启重新选择；缺证据由统计层明确显示未知。
+        metadata.originSources ??= originSources;
         metadata.reviewSegments.push({
           reviewId: randomUUID(),
           sessionId: ctx.sessionManager.getSessionId(),

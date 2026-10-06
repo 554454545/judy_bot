@@ -96,6 +96,11 @@ def register_task(root, request):
         "acceptance": text_list(request.get("acceptance"), "acceptance"),
         "artifacts": paths(request.get("artifacts"), "artifacts"),
     }
+    clarifications = request.get("clarificationRequests", [])
+    if not isinstance(clarifications, list):
+        raise ValueError("clarificationRequests 必须是实际消息列表")
+    if clarifications:
+        candidate["clarificationRequests"] = [original_request(item) for item in clarifications]
     with transaction(root) as registry:
         get(registry, project_id)
         old = registry["tasks"].get(task_id)
@@ -180,7 +185,8 @@ def prepare(root, task_id):
         if task["status"] != "registered":
             raise ValueError("任务已进入其他阶段，不能重新准备")
         original = original_request(task.get("originalRequest"))
-        clarifications = [original_request(item["request"]) for item in task.get("revisions", [])]
+        clarifications = [original_request(item) for item in task.get("clarificationRequests", [])]
+        clarifications.extend(original_request(item["request"]) for item in task.get("revisions", []))
         project = get(registry, task["projectId"])
         preflight = check(project)
         for field in ("scope", "artifacts"):
@@ -291,9 +297,11 @@ def read_spec(filename):
     return value
 
 
-def session_request(provided=None):
+def session_request(provided=None, entry_id=None):
     session_id = os.environ.get("PI_SESSION_ID")
     if not session_id:
+        if entry_id is not None:
+            raise ValueError("选择历史原话必须有真实持久 Pi session")
         # 独立 CLI 调用者负责提供真实资料；Pi 内调用必须使用运行时来源。
         return original_request(provided)
     filename = os.environ.get("PI_SESSION_FILE")
@@ -314,9 +322,11 @@ def session_request(provided=None):
         branch.append(entry)
         current = entry.get("parentId")
     user = next((entry for entry in branch if entry.get("type") == "message"
-                 and entry.get("message", {}).get("role") == "user"), None)
+                 and entry.get("message", {}).get("role") == "user"
+                 and (entry_id is None or entry["id"] == entry_id)), None)
     source = next((entry for entry in branch if entry.get("type") == "custom"
-                   and entry.get("customType") == "background-original-request"), None)
+                   and entry.get("customType") == "background-original-request"
+                   and user and entry.get("data", {}).get("entryId") == user["id"]), None)
     data = source.get("data", {}) if source else {}
     if not user or data.get("entryId") != user["id"] or data.get("error"):
         raise ValueError("本轮原话未取证或输入类型不支持，不能复用旧原话或从需求补造")
@@ -330,6 +340,26 @@ def session_request(provided=None):
         if content != original["text"]:
             raise ValueError("原话和实际 Pi 用户消息不一致")
     return original
+
+
+def registration_sources(request):
+    current = session_request(request.get("originalRequest"))
+    selected = request.get("sourceEntryIds", [])
+    if not isinstance(selected, list) or any(not isinstance(value, str) for value in selected) or len(set(selected)) != len(selected):
+        raise ValueError("sourceEntryIds 必须为不重复的实际 user entry ID 列表")
+    sources = [session_request(entry_id=value) for value in selected]
+    if not any(item["entryId"] == current["entryId"] for item in sources):
+        sources.append(current)
+    for item in sources:
+        if item["sessionId"] != current["sessionId"] or item["source"] != current["source"]:
+            raise ValueError("不能跨 session 或消息来源合并原话")
+        if item.get("telegram", {}).get("chatId") != current.get("telegram", {}).get("chatId") or item.get("telegram", {}).get("threadId") != current.get("telegram", {}).get("threadId"):
+            raise ValueError("不能跨 TG chat/thread 合并原话")
+    if selected:
+        entries = [json.loads(line) for line in Path(os.environ["PI_SESSION_FILE"]).read_bytes().splitlines() if line.strip()]
+        order = {entry.get("id"): index for index, entry in enumerate(entries)}
+        sources.sort(key=lambda item: order[item["entryId"]])
+    return sources
 
 
 def main():
@@ -351,6 +381,9 @@ def main():
     command = sub.add_parser("worktree-ensure")
     command.add_argument("project_id")
     command.add_argument("--base", required=True)
+    command = sub.add_parser("project-bind")
+    command.add_argument("project_id")
+    command.add_argument("--settings")
     command = sub.add_parser("prepare")
     command.add_argument("task_id")
     command = sub.add_parser("start-run")
@@ -412,10 +445,12 @@ def main():
         result = register_project(args.root, {**read_spec(args.spec), "projectId": args.project_id})
     elif args.cmd == "register":
         request = read_spec(args.spec)
+        sources = registration_sources(request)
         register_task(args.root, {
             **request,
             "taskId": args.task_id,
-            "originalRequest": session_request(request.get("originalRequest")),
+            "originalRequest": sources[0],
+            "clarificationRequests": sources[1:],
         })
         result = None
     elif args.cmd == "update":
@@ -430,6 +465,9 @@ def main():
         result = None
     elif args.cmd == "worktree-ensure":
         result = ensure_worktree(args.root, args.project_id, args.base)
+    elif args.cmd == "project-bind":
+        from execution.dispatch import bind_project
+        result = bind_project(args.root, args.project_id, read_spec(args.settings) if args.settings else None)
     elif args.cmd == "prepare":
         result = prepare(args.root, args.task_id)
     elif args.cmd == "start-run":
