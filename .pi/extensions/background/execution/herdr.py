@@ -233,6 +233,20 @@ def native_session(root, project_id):
     return observed
 
 
+def within_scope(relative, scope):
+    # **/* 表示当前 worktree 全部路径；其他条目保留原有文件/目录语义，不扩展到项目外。
+    path = Path(relative)
+    if path.is_absolute() or ".." in path.parts or path == Path("."):
+        return False
+    value = path.as_posix()
+    return any(
+        entry == "**/*"
+        or value == Path(entry).as_posix()
+        or value.startswith(Path(entry).as_posix().rstrip("/") + "/")
+        for entry in scope
+    )
+
+
 def supervise(root, timeout):
     # 被 Joye 风格 runner 当作真实子进程运行；退出码是本次监督进程的退出码，不是长期 Codex 的退出码。
     from execution.runner import atomic_json, digest, read, worktree_snapshot
@@ -312,7 +326,7 @@ def supervise(root, timeout):
     baseline = task["runs"][rid]["worktree_baseline"]
     snapshot = worktree_snapshot(project["worktreePath"])
     changed = sorted(path for path in set(baseline) | set(snapshot) if baseline.get(path) != snapshot.get(path))
-    outside = [path for path in changed if not any(path == relative or path.startswith(relative.rstrip("/") + "/") for relative in task["scope"])]
+    outside = [path for path in changed if not within_scope(path, task["scope"])]
     evidence = {
         "task_id": tid,
         "run_id": rid,

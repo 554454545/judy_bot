@@ -436,3 +436,10 @@ tests/background/preparation.py 回归通过，新增用真实配置文件验证
 test 五组、test1 五组，各创建加两次修改，30 条真实任务完整通过；15 次失败尝试单独保留。共 435 对实际主模型请求/回复，工具/模型/扩展异常为零；两个后台永久 UUID 保留。最终逐任务审计见 [final-chain-audit.json](.pi/agent/background/verification/full-chain/2026-10-06T00-56-25.090+08-00/final-chain-audit.json)，现场复核见 [final-runtime-audit.json](.pi/agent/background/verification/full-chain/2026-10-06T00-56-25.090+08-00/final-runtime-audit.json)，过程与时间见 [re.md](re.md)。构造入站和隔离扩展范围沿用上文限制，不冒充手机入站或八个扩展同时执行验收。
 
 生态回归：非法 plant 水域命令在 running/win/loss 都要拒绝；合法空命令在终局仍按 tick+1。读源码/测试前列实际任务文件，不按新机制猜 test_mechanisms.py。第二次尝试三阶段虽均报告成功，但 read ENOENT 仍判整组失败；第三次从新 session、新目录完整重跑后通过。
+
+### 失败任务后同项目续派：内部 host 与范围检查
+
+- 用例来源：[Issue #39](https://github.com/554454545/judy_bot/issues/39)。第一轮失败后 Codex 内部 host 常驻，不应永久占用项目；同项目后续任务继续复用原 worktree 和原生 UUID。
+- 本地回归入口为 `PYTHONDONTWRITEBYTECODE=1 python3 tests/background/failure-cleanup.py`。核对实际 executable、父进程、PID 出生身份，避免仅凭名字放行；host 的真实业务后代仍须阻止释放，取消不能误杀 host。
+- 范围为 `**/*` 时，根目录 README.md、game.js 和嵌套 outputs 文件均应获准；指定文件/目录仍拒绝相邻路径、绝对路径与上级跳转。旧失败结果不能因校验修正被补写成成功。
+- 实际续派测试的内容及数量等待用户指定；新建前台 session，后台仍复用同项目原生 session。单次结果记入 Issue，不能把本地进程夹具或只读证据复核称为完整 TG→Codex 新任务通过。
