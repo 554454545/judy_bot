@@ -305,9 +305,11 @@ node tests/mail/local-inbox.mjs 在项目临时目录验证空目录、列表、
 
 验收经验：后台测试首次真实创建项目会话后，后续任务必须复用；不套用前台测试“每组新建 Pi session”的方式。失败 marker 也不证明业务成功；明确区分 goal_complete、read_error 与独立验收。未做自动故障重启/未知派发恢复，未对接前台；自动首次业务任务创建原生会话的分支没有另建第二个项目复测，本次首次初始化采用上述真实只读准备任务。Codex 原生日志是会话证据，不声称等同 Pi 的 providerPayload 请求观测。
 
-### 2026-10-05：项目 Codex 会话列表快捷入口
+### 项目 Codex 原生会话列表快捷入口
 
-按用户要求，根目录新增 `resume-codex.sh` 并设置可执行权限。脚本从自身位置计算 Bot 根目录，仅为本次 Codex 进程设置 `.pi/agent/background/codex/test` 为 `CODEX_HOME`，执行 `codex resume --all --no-daemon`。`bash -n resume-codex.sh` 通过，执行权限已核对；本次没有启动新的交互客户端。
+运行根目录 `./resume-codex.sh`，应直接进入 Codex 的 `Resume a previous session` 界面，不先出现项目编号菜单。检查搜索、方向键、Active/Archived、排序和退出；会话的名称、UUID、时间、归档状态须与各源 home 的原生索引一致。已登记但尚无原生 UUID 的项目不伪造列表条目。
+
+原生列表汇总索引位于 `.pi/agent/background/codex-session-browser/`。检查原 rollout 链接及写锁指向原项目，已有持锁客户端不被覆盖，后台项目绑定、会话 UUID、启动参数和源 SQLite 不变；重复打开应拒绝刷新正在使用的索引。不要为查看列表派发开发输入或终止已有客户端。历史归档、名称刷新、UUID/Provider 不一致拒绝的离线回归在 `tests/background/project-onboarding.py`，单次实际验证记录在 Issue #32。
 
 ### 2026-10-05：后台 Codex 默认 gpt-6.1-sol、low、Fast
 

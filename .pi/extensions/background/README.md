@@ -148,7 +148,7 @@ tests/background/real-herdr-execution.py
 
 首次启动收据返回后若状态暂为 unknown，`herdr.py` 使用原生 `agent wait` 等待，再核对同一 name/workspace/pane、Agent 类型和 cwd。启动检测与状态等待共用 90 秒预算；blocked、working、身份变化或等待超时明确失败，保留现有 Agent 和证据。复用失败首次绑定时也核对原 Agent，等待只针对 unknown，不重新启动客户端。
 
-Bot 根目录 [resume-codex.sh](../../../resume-codex.sh) 汇总正式登记的 Codex 项目及后台目录内的历史原生会话，默认显示全部并按编号恢复；`./resume-codex.sh --list` 只查看。列表保留各自 CODEX_HOME，显示真实 UUID、名称和客户端占用；已登记但无原生会话的项目单独标明，不创建会话。选择时恢复实际 UUID 和工作目录，不迁移历史或强行释放已有写锁。
+Bot 根目录 [resume-codex.sh](../../../resume-codex.sh) 直接打开 Codex 原生 `resume --all --no-daemon` 界面，搜索、方向键、Active/Archived 和排序由 Codex 提供。`execution/codex.py` 的 browse 只读汇总各项目及历史 home 的原生 SQLite 元数据，私有浏览 home 位于 `.pi/agent/background/codex-session-browser/`；名称、UUID、时间与状态沿用源索引，不制造未生成的 session。原 rollout 和写锁以链接保留在各项目 home，后台登记与启动参数不迁移；原生恢复仍使用原 UUID、原 rollout、原工作目录和同一写锁，已有客户端占用时不能强行恢复。浏览器配置继承已登记项目的 Provider，不同 Provider 配置拒绝混用；只保留一个浏览实例，下次打开刷新索引。浏览 home 是独立的原生配置/索引，不是后台项目绑定；UI 的偏好及索引操作属于浏览 home，后台的源索引保持不变。没有原生 UUID 的项目不显示；旧编号菜单及 `--list` 参数已移除。
 
 启动和恢复都显式使用登记的模型、思考强度、Fast 参数及 [额度模型切换提醒开关](https://learn.chatgpt.com/docs/config-file/config-reference) `notice.hide_rate_limit_model_nudge=true`，避免提醒弹窗接收自动输入。`herdr-evidence.json.native_model_settings` 记录本次原生 `turn_context` 的实际模型与思考强度；不符合登记则 blocked，不以默认配置冒充实际调用。提示关闭不改变额度或网络重试策略。
 
