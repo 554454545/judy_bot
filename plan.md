@@ -77,11 +77,25 @@
 - 当前已授权后台第一阶段：项目绑定、任务登记、交接稿生成、worktree 只读检查及显式创建/复用；实现集中 `.pi/extensions/background/`，私有登记数据在 `.pi/agent/background/`，工作测试目录 `/home/judy/workspace/test`。Agent 类型由项目绑定指定，不绑定 Codex 实现。
 - 后台调用方式沿用 Joye：已有 `bash` 调用 task_protocol.py 的 register --spec、update --delta --expected-hash、inspect；不注册额外后台模型工具，不另写工作流 Skill，使用已保存 Joye herdr-workflow 副本的路径和当前阶段适配。执行前状态保持 registered，交接文件和 hash 表示准备结果；用户指定的差异逐项记录在后台目录 README。
 - 用户已授权完整后台接入：登记、真实派发、自动回传、独立验收、TG 主动通知、watchdog、取消/重试及项目 Herdr 常驻恢复。沿用文件 CLI 与 Joye 的 task/run、outbox/inbox、真实投递签收；不新增后台模型工具。实现集中 `.pi/extensions/background/execution/` 和 `notifications/`，启动沿用 `scripts/startup/telegram.mjs`。明确只准备时不执行；不合并、提交或推送业务代码。
-- 用户已授权配置 Bot 专用 Herdr 环境并使用最新稳定版：项目内当前安装 0.9.3，通过 `scripts/startup/herdr.sh` 使用独立 `bot` session，配置和运行数据位于 `.pi/agent/background/herdr/`。继续关闭自动更新，后续版本变更按用户明确要求执行。现已授权将本项目旧 bot-herdr 的空闲 Codex 正常退出，并在新版实例 resume 原 UUID，复用相同 CODEX_HOME；不终止其他项目或整个旧 server。前台通过任务文件 CLI 接入，TG 的 Windows 启动入口保持现有形式，telegram.mjs 同时监督项目内 background/execution/service.py，实现本地 Herdr 启动与原会话恢复；实际覆盖以 re.md 为准。后续项目操作使用本地入口，不能因 pane ID 相同而混用不同实例的绑定。操作说明见 [项目启动说明](scripts/startup/README.md)。Herdr 原生日志使用 UTC（`Z`），保留原值；项目验收记录使用北京时间。
+- 用户已授权配置 Bot 专用 Herdr 环境并使用最新稳定版：项目内当前安装 0.9.3，通过 `scripts/startup/herdr.sh` 使用独立 `bot` session，配置和运行数据位于 `.pi/agent/background/herdr/`。继续关闭自动更新，后续版本变更按用户明确要求执行。现已授权将本项目旧 bot-herdr 的空闲 Codex 正常退出，并在新版实例 resume 原 UUID，复用相同 CODEX_HOME；不终止其他项目或整个旧 server。前台通过任务文件 CLI 接入，TG 的 Windows 启动入口保持现有形式，telegram.mjs 同时监督项目内 background/execution/service.py，实现本地 Herdr 启动与原会话恢复；历史覆盖见 re.md，后续变更与验收以对应 GitHub Issue 为准。后续项目操作使用本地入口，不能因 pane ID 相同而混用不同实例的绑定。操作说明见 [项目启动说明](scripts/startup/README.md)。Herdr 原生日志使用 UTC（`Z`），保留原值；项目验收记录使用北京时间。
 - 每项目长期 worktree 和一个固定 Agent session，多个任务串行复用；Herdr Agent 和 Coding Agent 会话名为 `herdr-项目名`，真实 session ID 另存，不用名字冒充 ID。测试项目源目录为 `/home/judy/workspace/test`；长期 worktree 放本项目 `.worktrees/`（Git 忽略），具体目录、工作分支与基准由登记和调用参数指定，不写死在实现中。新 Codex 配置、会话和日志放在本项目内，只读本项目现有认证，不迁移全局凭据。
 - 仅修改本项目和用户在具体任务中明确授权的目标。操作其他项目不改变本文件对全局 Pi 的保护边界。
-- 本次健康实验授权 `/home/judy/workspace/test` 与新目录 `/home/judy/workspace/test1`，分别五组复杂创建与多轮修改。新目录可初始化测试 Git 基线并创建项目内长期 worktree；不得覆盖既有内容。使用真实模型与 Coding Agent，允许向已配对 TG 发送测试结果。每组前台新 session，后台每项目复用一个原生 session；失败组修复后整组重跑。过程、时间、问题和证据写入 [re.md](re.md)，构造消息不能冒充真实 Telegram 用户入站。
+- 本次健康实验授权 `/home/judy/workspace/test` 与新目录 `/home/judy/workspace/test1`，分别五组复杂创建与多轮修改。新目录可初始化测试 Git 基线并创建项目内长期 worktree；不得覆盖既有内容。使用真实模型与 Coding Agent，允许向已配对 TG 发送测试结果。每组前台新 session，后台每项目复用一个原生 session；失败组修复后整组重跑。既有过程保留在 [re.md](re.md)，后续过程、时间、问题和验收摘要写入对应 GitHub Issue，私有证据仍留在项目运行目录；构造消息不能冒充真实 Telegram 用户入站。
 - 用户要求查看、诊断或评审时只检查和报告；要求修改时再实施。不恢复此前已撤回的规划。
+
+## GitHub Issues 问题处理流程
+
+- 问题与改进需求统一登记到 [554454545/judy_bot 的 Issues](https://github.com/554454545/judy_bot/issues)，作为调查、方案、修改与验收的正式记录。用户已要求以后在自己的仓库记录这些内容；普通聊天不建单，记录问题不扩大代码修改、付费调用、部署或其他仓库的操作权限。
+- 开始调查或处理项目前，先用 `gh issue list --repo 554454545/judy_bot --state all --search '相关关键词'` 查找，再读取相关 Issue 正文、评论及关联 PR。同一问题追加到原 Issue；已关闭问题再次复现时核对版本和条件，在原单补充证据并重新打开，原因或范围不同则建新单并互相链接。不批量建空单，也不把尚未复现的推测当成故障。
+- 标题使用中文的“模块：具体问题或需求”。正文保留必要的用户原话与整理后的目标，按“1. 现象、复现与证据／2. 原因分析与处理方向／3. 验收标准”组织；写明实际版本或 commit、环境、预期与实际行为。未知项标为未知，已确认事实与推测分开；调研或功能需求可以明确写尚未复现、尚未实现。
+- 分类沿用 `bug`、`enhancement`、`question` 或 `documentation`；按实际模块添加 `area:<模块>` 标签，不机械复制其他仓库的标签。优先级需要时使用 `P0`（核心链路不可用或数据损坏）、`P1`（重要功能受阻）、`P2`（一般缺陷或改进），用户指定的优先级优先。需要用户决策时注明具体问题，可使用 `needs-decision`；不为了凑状态预建标签。
+- Issue 正文维护当前范围与验收清单。调查发现、复现结果、失败尝试、方案变化、实际修改和验收分别在有新证据时追加评论，说明当前是待调查、待处理、处理中或待验收，不覆盖旧结论来抹去过程。日期使用北京时间并注明 `+08:00`；耗时依据单调时钟或可核对的阶段记录，不能从文件修改时间猜测。
+- 证据给出必要的脱敏摘要和定位信息：相关源码路径与 commit、session/requestId/task/run、观测文件相对路径及实际发生时间。私有原始日志与请求快照继续留在 `.pi/agent/`，不能上传凭据、完整私人会话或完整 providerPayload；注明本地证据路径无法直接在 GitHub 打开。
+- 在已授权修复与代码交付的范围内，使用短期分支和 PR 关联 Issue，PR 写清具体改动和实际验证。只需代码或文档检查即可验收的项目可以在通过后用 `Fixes #编号`；需要重启、部署或真实 TG 运行验收时先用 `Refs #编号`，合并 PR 后保持 Issue 开放，完成实际验收再关闭。PR 合并不能代替运行验收，不主动增加部署授权。
+- 关闭前追加处理结果，逐项核对验收标准，链接 PR、实际提交与验证证据，明确未覆盖的条件。未解决但决定不做、重复或无法复现时说明理由，以相应关闭原因结束；不能写成已修复。交付给用户时提供 Issue 链接，涉及代码时同时提供 PR 链接。
+- `problem.md`、`re.md` 仅保留历史，不再追加新问题、解决过程或单次实验报告；历史条目的旧状态不代表当前状态。本次不自动迁移旧条目，后续实际处理旧问题时先核对当前证据，再建立或关联 Issue 并注明历史出处。`test.md` 只积累可复用用例、复现步骤和验收方法，单次执行结果写入对应 Issue；使用说明与架构文档仍在源码仓库维护。
+- GitHub 暂时不可用时明确报告建单或更新未成功，私有证据留在本地，不能声称已登记、改用 Markdown 作为新的问题台账，或盲目重试可能已经成功的写入；恢复后先查询确认，再补记。
+- 手动建单使用 [中文 Issue 表单](.github/ISSUE_TEMPLATE/project-issue.yml)。Agent 通过 `gh issue create/comment --repo 554454545/judy_bot` 建单或更新时也遵循上述字段；多行正文通过项目 `.cache/tmp/` 内临时文件传给 `--body-file`，回读确认后清理本次临时内容。
 
 ## 验证与交付
 
@@ -89,6 +103,6 @@
 - 文档或路径变更执行对应检查；运行逻辑变更验证实际行为及主要失败模式，不以版本输出代替前台功能验收。
 - 默认使用本地测试数据，不自行发送 Telegram 消息、调用付费模型、部署服务、提交或推送代码；这些操作需要用户明确授权。
 - 清理只限本项目及本次任务创建的对象，不清理全局安装、缓存、会话或用户已有进程。
-- 交付时说明修改内容和重要限制；常规测试及结果记录在项目内，不在聊天中逐项叙述，失败或影响结论的未验证链路仍须说明。安装基础 Pi 不等于扩展已加载、Telegram 已接通或 Bot 已上线。
+- 交付时说明修改内容和重要限制；常规验证结果记录在对应 GitHub Issue，私有原始证据保留在项目内，不在聊天中逐项叙述，失败或影响结论的未验证链路仍须说明。安装基础 Pi 不等于扩展已加载、Telegram 已接通或 Bot 已上线。
 
 - JSONL 文件名时间使用北京时间（UTC+8，以 +08-00 标识）；运行目录名保持 sessions 和 observability，不改为中文。项目生成的日志和观测时间使用北京时间并明确标注 +08:00；Pi/Provider 原生协议时间及 Unix 时间戳保留原值，不改写原始请求证据。

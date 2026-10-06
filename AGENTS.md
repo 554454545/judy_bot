@@ -6,7 +6,9 @@
 
 [plan.md](plan.md) 保存项目的详细边界、目录组织、参考材料和验证交付约定；不要根据记忆猜测或自行扩大任务范围。
 
-执行前台对话测试前读取 [测试问题与验收经验](test.md)，按相关用例新建 session 并测试；遇到的问题和回归问题持续补充到该文件，缺陷详情记入 [项目问题记录](problem.md)。
+本项目的新问题、改进需求、调查过程、解决方案与验收结果统一记录在 [GitHub Issues](https://github.com/554454545/judy_bot/issues)。执行这类任务前读取 [GitHub Issues 问题处理流程](plan.md#github-issues-问题处理流程)，先查已有 Issue，再建单或追加；记录问题不等于授权修复。
+
+执行前台对话测试前读取 [测试问题与验收经验](test.md)，按相关用例新建 session 并测试；该文件只维护可复用用例，单次过程与结果写入对应 Issue。[problem.md](problem.md) 和 [re.md](re.md) 保留为历史，不再追加新问题与处理过程。
 
 用户询问模型实际收到的上下文、System Prompt、历史、回复、工具、缓存或费用时，先读取 [查看模型实际请求上下文](docs/observability/inspect-model-request-context.md)，再按该规则查询本地观测记录。
 
