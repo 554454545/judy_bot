@@ -448,11 +448,21 @@ def main():
     run_parser.add_argument("--spec", required=True)
     run_parser.add_argument("--prompt", required=True)
     run_parser.add_argument("--run-id", required=True)
-    run_parser.add_argument("--timeout", type=int, default=600)
+    run_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="Coding Agent 等待预算（秒），默认 1800（30 分钟）；超时不代表 Agent 已停止",
+    )
     execute_parser = sub.add_parser("execute")
     execute_parser.add_argument("task")
     execute_parser.add_argument("run")
-    execute_parser.add_argument("--timeout", type=int, default=600)
+    execute_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="Coding Agent 等待预算（秒），默认 1800（30 分钟）；超时不代表 Agent 已停止",
+    )
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("task")
     verify_parser.add_argument("run")

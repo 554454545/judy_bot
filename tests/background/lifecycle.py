@@ -1,4 +1,4 @@
-# 后台生命周期离线回归：核对真实文件协议的 inbox、并发领取、崩溃租约、签收和未知发送防重；关联 background/notifications，不计入十组真实实验。
+# 后台生命周期离线回归：核对等待预算派发、真实文件协议的 inbox、并发领取、崩溃租约、签收和未知发送防重；关联 background/execution、notifications，不计入十组真实实验。
 import copy
 import importlib.util
 import json
@@ -18,6 +18,107 @@ from storage.registry import transaction, timestamp
 
 
 class Lifecycle(unittest.TestCase):
+    def test_dispatch_timeout_reaches_supervisor_command(self):
+        import contextlib
+        import io
+        import shlex
+        from unittest.mock import patch
+        from execution import dispatch
+        from tasks import task_protocol as frontend
+
+        commands = []
+
+        def control(_settings, *args):
+            responses = {
+                ("workspace", "list"): {
+                    "workspaces": [{
+                        "label": "bot-runtime",
+                        "workspace_id": "w-runtime",
+                    }],
+                },
+                ("pane", "list"): {
+                    "panes": [{"pane_id": "w-runtime:p1"}],
+                },
+                ("agent", "list"): {"agents": []},
+                ("pane", "process-info"): {
+                    "process_info": {
+                        "shell_pid": 123,
+                        "foreground_process_group_id": 123,
+                        "foreground_processes": [{"pid": 123}],
+                    },
+                },
+            }
+            if args[:2] == ("pane", "run"):
+                self.assertEqual(args[2], "w-runtime:p1")
+                commands.append(shlex.split(args[3]))
+                return {"cli_exit_code": 0}
+            return {"result": responses[args[:2]]}
+
+        for entry, arguments, expected in (
+            ("frontend", [], 1800),
+            ("frontend", ["--timeout", "73"], 73),
+            ("direct", [], 1800),
+        ):
+            with self.subTest(entry=entry, arguments=arguments):
+                with transaction(self.root) as registry:
+                    task = registry["tasks"]["complex"]
+                    task["status"] = "starting"
+                    task["runs"]["run-1"] = {}
+                    registry["projects"]["fixture"] = {
+                        "executionSettings": {},
+                        "activeExecution": {
+                            "task_id": "complex",
+                            "run_id": "run-1",
+                        },
+                    }
+                argv = [
+                    "task_protocol.py",
+                    "--root", str(self.root),
+                    "run", "complex", "run-1",
+                    *arguments,
+                ]
+                with patch.object(dispatch, "control", side_effect=control):
+                    if entry == "frontend":
+                        output = io.StringIO()
+                        with patch.object(sys, "argv", argv), contextlib.redirect_stdout(output):
+                            frontend.main()
+                        receipt = json.loads(output.getvalue())
+                    else:
+                        receipt = dispatch.launch(self.root, "complex", "run-1")
+                command = commands[-1]
+                execute_arguments = command[command.index("execute") + 1:command.index("--timeout")]
+                self.assertEqual(execute_arguments, ["complex", "run-1"])
+                self.assertEqual(command[command.index("--timeout") + 1], str(expected))
+                self.assertEqual(receipt["state"], "starting")
+                self.assertTrue(Path(receipt["receipt_path"]).is_file())
+                stored_run = runner.read(self.root / "registry.json")["tasks"]["complex"]["runs"]["run-1"]
+                self.assertNotIn("runner_started", stored_run)
+
+    def test_runner_cli_keeps_default_and_explicit_wait_budget(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        for operation, arguments in (
+            ("run", [
+                "--spec", "fixture-spec.json",
+                "--prompt", "fixture-prompt.md",
+                "--run-id", "run-1",
+            ]),
+            ("execute", ["complex", "run-1"]),
+        ):
+            for override, expected in (([], 1800), (["--timeout", "73"], 73)):
+                with self.subTest(operation=operation, override=override):
+                    argv = ["runner.py", "--root", str(self.root), operation, *arguments, *override]
+                    with (
+                        patch.object(sys, "argv", argv),
+                        patch.object(runner, "start_run", return_value=("complex", "run-1")),
+                        patch.object(runner, "run_command", return_value="fixture-result.json") as execute,
+                        contextlib.redirect_stdout(io.StringIO()),
+                    ):
+                        runner.main()
+                    execute.assert_called_once_with(self.root.resolve(), "complex", "run-1", expected)
+
     def test_unknown_delivery_remains_attention_across_own_leaf_and_timeout(self):
         claimed = notices.claim(self.root, self.owner)
         failure = self.root / "attention.json"

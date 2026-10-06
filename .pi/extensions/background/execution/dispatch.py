@@ -114,7 +114,7 @@ def control(settings, *arguments):
     return result
 
 
-def launch(root, task_id, run_id, timeout=600):
+def launch(root, task_id, run_id, timeout=1800):
     if type(timeout) is not int or timeout <= 0:
         raise ValueError("执行超时必须为正整数秒")
     tid = ident(task_id)

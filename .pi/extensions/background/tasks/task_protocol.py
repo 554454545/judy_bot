@@ -392,7 +392,12 @@ def main():
     command = sub.add_parser("run")
     command.add_argument("task_id")
     command.add_argument("run_id")
-    command.add_argument("--timeout", type=int, default=600)
+    command.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="Coding Agent 等待预算（秒），默认 1800（30 分钟）；超时不代表 Agent 已停止",
+    )
     command = sub.add_parser("result")
     command.add_argument("task_id")
     command.add_argument("run_id")

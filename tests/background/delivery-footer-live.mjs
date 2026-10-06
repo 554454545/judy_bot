@@ -157,7 +157,7 @@ try {
     appendSystemPrompt: [fs.readFileSync(path.join(bot, "AGENTS.md"), "utf8"), [
       `本次是用户授权的真实后台尾注验收。唯一登记根目录=${root}；所有 task_protocol.py 命令在子命令前必须传 --root ${root}。禁止修改正式登记表。`,
       `spec/review 等私有文件仅写 ${root}/handoffs 和 ${root}/reviews，真实 Coding Agent 仅修改 test worktree 下 ${business}/。前台不能代写业务代码，不修改 Bot 其他文件。`,
-      "沿用 Joye herdr-workflow 登记原话、prepare、核对 hash、start-run、run --timeout 600。每次 bash 一个协议操作；异步收据返回就回复，不等待或轮询 worker，不自行控制 Herdr。",
+      "沿用 Joye herdr-workflow 登记原话、prepare、核对 hash、start-run、run，沿用项目默认后台等待预算。每次 bash 一个协议操作；异步收据返回就回复，不等待或轮询 worker，不自行控制 Herdr。",
       "内部事件到来才按原始 acceptance 独立验收，读取确认存在的任务范围产物，实际运行检查后 verify。不得读完整 worker 对话、终端历史或 diff；不要自行发送 TG 或调用 report/prepare-report/ack。",
     ].join("\n")],
   });

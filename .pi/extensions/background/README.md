@@ -87,6 +87,8 @@ project spec 保存 sourcePath、worktreePath、branch、agentKind，ID 由命�
 
 start-run 校验已登记任务的原话、修订、当前交接 hash，保存不可变本次副本并占用项目。run 在 Bot 专用 Herdr 的 bot-runtime Shell pane 启动监督程序后快速返回收据；前台不等待 worker、不轮询。重复 run 或项目尚未验收时的第二个 start-run 拒绝。收据只证明命令已交给 Shell，实际输入和结果由本次证据确认。
 
+`run` 等待 Coding Agent 完成的默认预算为 1800 秒（30 分钟）；前台 CLI、dispatch.launch 与 runner 的 run/execute 入口保持一致。`--timeout SECONDS` 可显式覆盖单次预算，监督层转为毫秒传给 Herdr `agent prompt --wait`（默认 `--timeout 1800000`）。这不是前台 bash 的调用超时，也不是独立验收时限。超时只表示等待预算用尽，Agent 或业务命令可能仍在运行，继续沿用原有对账、取消和占用保护；修改默认值不延长已启动 run，也不改写历史失败结果。
+
 CLI 的 --root 支持相对于调用方工作目录的路径；入口立即解析绝对目录，start_run 也在生成交接路径前再次固定它。交接稿中的业务结果文件始终是绝对路径，因为原生 Agent 的 cwd 是项目 worktree。不能把 Bot 相对路径原样交给 Agent，也不为已有失败 run 移动或补造结果。
 
 result 只返回状态、最多 1200 字符的业务摘要和私有证据路径，不返回 worker 历史、完整终端日志或 diff。前台按 acceptance 读取具体产物并执行检查，写匹配 task/run 的私有 review，再 verify。成功验收释放项目占用；真实失败保持 blocked，不自动重试。
