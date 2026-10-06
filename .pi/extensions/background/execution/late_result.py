@@ -57,10 +57,11 @@ def collect(root, task, project, actual, native):
     expected_business = {
         "task_id": tid,
         "run_id": rid,
-        "reason": "goal_complete",
     }
-    if any(business.get(key) != value for key, value in expected_business.items()) or business.get("error"):
-        raise ValueError("业务结果尚未完成或身份不同")
+    if any(business.get(key) != value for key, value in expected_business.items()):
+        raise ValueError("业务结果身份不同")
+    if business.get("reason") not in ("goal_complete", "read_error", "http_error", "error"):
+        raise ValueError("业务结果尚未明确收尾")
     snapshot = runner.worktree_snapshot(project["worktreePath"])
     baseline = run["worktree_baseline"]
     changed = sorted(path for path in set(baseline) | set(snapshot) if baseline.get(path) != snapshot.get(path))
@@ -121,8 +122,8 @@ def collect(root, task, project, actual, native):
         "pid_identity_source": "original_herdr_supervisor",
         "stdout_hash": runner.digest(observed.stdout.encode()),
         "stderr_hash": runner.digest(observed.stderr.encode()),
-        "reason": "goal_complete",
-        "error": None,
+        "reason": business["reason"],
+        "error": business.get("error"),
         "marker": {
             "expected": run["marker"],
             "seen": True,

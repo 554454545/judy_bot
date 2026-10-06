@@ -294,12 +294,12 @@ def reconcile(root, now=None):
                         from execution.late_result import collect
                         step = "late_completion"
                         late = collect(root, old, projects[old["projectId"]], actual, native)
-                    if not late:
+                    if not late or runner.result_status(late["result"]) == "blocked":
                         cleanup = {
                             "task_id": old["taskId"],
                             "run_id": old["run_id"],
                             "session_id": native["id"],
-                            "result_hash": runner.digest(observation["result"]),
+                            "result_hash": runner.digest(late["result"] if late else observation["result"]),
                             "agent_hash": runner.digest(actual),
                             "child_processes": children,
                             "process_baseline_hash": runner.digest(old_run["worker_process_baseline"]),
@@ -371,8 +371,9 @@ def reconcile(root, now=None):
                     project.pop("activeExecution")
             if "result" in observation and task["status"] not in ("verified", "reported", "rework"):
                 status = runner.result_status(observation["result"])
+                result_changed = task["runs"][rid].get("result_path") != observation["result_path"]
                 task["runs"][rid]["result_path"] = observation["result_path"]
-                if task["status"] != status:
+                if task["status"] != status or result_changed:
                     task.update(status=status, status_changed_at=timestamp())
                 runner.emit(registry, task, status)
             elif task["status"] in ("starting", "running"):

@@ -145,6 +145,24 @@ class LateResults(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.verify(self.root, "task", "run", review)
 
+    def test_native_finished_business_failure_releases_slot_and_notifies_new_result(self):
+        runner.atomic_json(self.directory / "business.json", {
+            "task_id": "task",
+            "run_id": "run",
+            "reason": "read_error",
+            "error": "实际业务文件缺失",
+        })
+        registry = self.reconcile()
+        task = registry["tasks"]["task"]
+        self.assertEqual(task["status"], "blocked")
+        self.assertNotIn("activeExecution", registry["projects"]["project"])
+        result = runner.read(task["runs"]["run"]["result_path"])
+        self.assertEqual(result["reason"], "read_error")
+        self.assertEqual(result["error"], "实际业务文件缺失")
+        self.assertEqual(runner.read(self.directory / "result.json"), self.original)
+        failures = [event for event in registry["outbox"].values() if event["phase"] == "blocked"]
+        self.assertEqual(len(failures), 2, "真实新失败有独立事件，不能复用旧超时通知")
+
     def test_handled_failure_suppresses_overdue_but_not_unknown_or_new_state(self):
         event = runner.read(self.root / "registry.json")["outbox"][self.event_id]
         notices.enqueue(self.root, "失败", event=event)
