@@ -443,3 +443,13 @@ test 五组、test1 五组，各创建加两次修改，30 条真实任务完整
 - 本地回归入口为 `PYTHONDONTWRITEBYTECODE=1 python3 tests/background/failure-cleanup.py`。核对实际 executable、父进程、PID 出生身份，避免仅凭名字放行；host 的真实业务后代仍须阻止释放，取消不能误杀 host。
 - 范围为 `**/*` 时，根目录 README.md、game.js 和嵌套 outputs 文件均应获准；指定文件/目录仍拒绝相邻路径、绝对路径与上级跳转。旧失败结果不能因校验修正被补写成成功。
 - 实际续派测试的内容及数量等待用户指定；新建前台 session，后台仍复用同项目原生 session。单次结果记入 Issue，不能把本地进程夹具或只读证据复核称为完整 TG→Codex 新任务通过。
+
+### 迟到结果、旧失败通知与输入状态
+
+- 监督超时后，原 `result.json` 不变；仅同一 task/run/session 的真实输入、final marker、原生完成及新产物都匹配时，收集迟到结果进入独立验收。不能从终端 done 或业务自述直接判目标完成。待验收期间保留项目占用。
+- 缺 marker、缺 task_complete、参数变化、范围外修改、新输入、取消与登记变化均不能晋级；重启留下的收集文件必须重新核对，不能覆盖不可变证据。已释放并开始后续任务的历史 run 不自动采用当前产物。
+- 同一失败已有真实 sender 签收和 handled 证明后，不再产生、派送或消费无新信息的 blocked_overdue；新结果、新失败阶段及 unknown 不能被旧签收吞掉。
+- 迟到交付不能复用旧失败正文、message_id 或统计快照；仍引用原始 TG 提问。开发耗时取核实的原生 duration_ms 并说明来源，不能拿超时预算作完整耗时。
+- 后台无 activeTurn 的模型回合结束也要停止 typing；切 session 时旧 getMe 与能力转换的异步回调不能访问旧 ctx，新监控继续工作。网络日志只保留类型和 code，不含凭据 URL、headers 或原话。
+- 需求交接与验收保留用户原始目标，不能把“1:1／几乎一致”改成简化目标；可运行和自动测试通过不能代替原目标验收，缺失或未核实的部分不能通过。
+- 本地回归入口：`tests/background/late-results.py`、`tests/background/late-delivery.mjs`、`tests/telegram/lifecycle.mjs`。这些不调用模型或 TG，不算完整真实链路实验；实际任务内容和数量仍等待用户指定，证据记录到 Issue #45、#46、#38。

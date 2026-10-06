@@ -30,8 +30,9 @@ export function finalReplyOnlyApi(pi: ExtensionAPI): ExtensionAPI {
           }, ctx: ExtensionContext) => {
             const control = (globalThis as any)[Symbol.for("bot.background.control-turn")];
             if (control?.sessionId === ctx.sessionManager.getSessionId()) {
-              // 内部验收由 background/notifications 在核对真实结果后单独交付，不投递模型中间正文。
-              return;
+              // 内部验收不投递模型正文，但仍交给桥接执行 agent_end 的 typing/队列清理。
+              // 空 messages 不生成 assistant 输出；普通 TG 回合的原始事件不变。
+              return handler({ ...event, messages: [] }, ctx);
             }
             // 原始事件及历史不变；只给桥接补一个完整的最终文字块。
             const message = event.messages.findLast(item => item.role === "assistant");

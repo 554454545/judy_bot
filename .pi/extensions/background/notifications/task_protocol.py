@@ -99,8 +99,47 @@ def freshness(reg, e):
         return (c, 'phase_reentered')
     return (c, None)
 
-def dispose_control(reg, e, now):
+def handled_failure(root, reg, t):
+    # 原失败已经有真实发送和 handled 文件证明时，抑制同一结果的旧提醒；不抑制新结果或未知发送。
+    if t.get('status') != 'blocked':
+        return False
+    if t.get('observation') in ('result_unreadable', 'result_identity_mismatch', 'herdr_unavailable'):
+        return False
+    try:
+        box = read(Path(root) / 'inbox.json', {})
+        ledger = read(Path(root) / 'telegram-receipts.json', {})
+    except (OSError, ValueError):
+        return False
+    if not isinstance(box, dict) or not isinstance(ledger, dict):
+        return False
+    for event in box.values():
+        if event.get('state') != 'handled' or event.get('phase') not in ('blocked', 'blocked_overdue'):
+            continue
+        canonical, reason = freshness(reg, event)
+        if reason or not canonical or canonical.get('task_id') != t['taskId']:
+            continue
+        if canonical.get('result_path') != t['runs'][t['run_id']].get('result_path'):
+            continue
+        proof = event.get('receipt', {})
+        try:
+            if not proof.get('path') or summary(proof['path']) != proof:
+                continue
+            detail = read(proof['path'], {})
+            delivery = detail.get('receipt', {})
+            known = any(item.get('state') == 'success' and all(item.get(key) == delivery.get(key) for key in ('event_id', 'message_id', 'hash', 'target')) for item in ledger.values())
+            if detail.get('event_id') == event['event_id'] and detail.get('task_id') == t['taskId'] and detail.get('run_id') == t['run_id'] and detail.get('status') == 'blocked' and delivery.get('state') == 'success' and known:
+                return True
+        except (OSError, ValueError, TypeError):
+            continue
+    return False
+
+
+def dispose_control(reg, e, now, root=None):
     c, reason = freshness(reg, e)
+    if not reason and root is not None and (c or {}).get('phase') == 'blocked_overdue':
+        current = reg['tasks'][c['task_id']]
+        if handled_failure(root, reg, current):
+            reason = 'failure_already_notified'
     if not reason:
         return False
     if e.get('state') in ('handled', 'superseded'):
@@ -172,7 +211,7 @@ def claim(root, owner, now=None):
         for e in sorted(box.values(), key=lambda e: (max(e.get('last_claim_at', 0), epoch(e.get('created_at', e.get('ts', 0)))), e.get('ts', 0), e.get('admission_order', 0), e['event_id'])):
             if e['state'] in ('handled', 'superseded'):
                 continue
-            if dispose_control(reg, e, now):
+            if dispose_control(reg, e, now, root):
                 continue
             if not route_matches(e.get('route', {}), owner):
                 continue
@@ -196,7 +235,7 @@ def validate_notice(root, eid, cid, owner, now=None):
             return {'action': 'stale_claim'}
         if e['state'] in ('handled', 'superseded'):
             return {'action': e['state']}
-        if dispose_control(reg, e, now):
+        if dispose_control(reg, e, now, root):
             return {'action': e['state']}
         keys = ('pid', 'session_id', 'profile', 'target', 'generation', 'epoch', 'leaf_id')
         if not route_matches(e.get('route', {}), dict(owner, idle=True)) or any((e.get('owner', {}).get(k) != owner.get(k) for k in keys)):
@@ -263,7 +302,7 @@ def observe_input(root, eid, cid, entry_id, session_id, recovery_entry_id=None, 
             raise ValueError('stale claim')
         if e['state'] in ('handled', 'superseded'):
             return {'action': e['state']}
-        if dispose_control(reg, e, now):
+        if dispose_control(reg, e, now, root):
             return {'action': e['state']}
         if e.get('owner', {}).get('session_id') != session_id:
             raise ValueError('session mismatch')
@@ -290,6 +329,8 @@ def drain(root, sender, now=None):
                 if d['state'] in ('success', 'unknown', 'superseded', 'internal'):
                     continue
                 _, reason = freshness(reg, event)
+                if not reason and event.get('phase') == 'blocked_overdue' and handled_failure(root, reg, reg['tasks'][event['task_id']]):
+                    reason = 'failure_already_notified'
                 if reason in ('registry_missing', 'phase_unknown'):
                     continue
                 if reason and d['state'] != 'sending':

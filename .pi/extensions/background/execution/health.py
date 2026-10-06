@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from execution import codex, dispatch, runner
-from notifications.task_protocol import TERMINAL, epoch
+from notifications.task_protocol import TERMINAL, epoch, handled_failure
 from storage.registry import timestamp, transaction
 
 
@@ -214,7 +214,12 @@ def probe(root, task, project, now):
     run = task.get("runs", {}).get(task.get("run_id"))
     if not run:
         return {"observed": "not_started"}
-    path = Path(root) / "runs" / task["taskId"] / task["run_id"] / "result.json"
+    directory = Path(root) / "runs" / task["taskId"] / task["run_id"]
+    path = Path(run.get("result_path") or directory / "result.json")
+    if path.parent.resolve() != directory.resolve():
+        return {"observed": "result_identity_mismatch"}
+    if path.name == "late-result.json" and runner.summary(path) != run.get("late_result"):
+        return {"observed": "result_identity_mismatch"}
     try:
         result = runner.read(path)
     except (OSError, ValueError):
@@ -265,6 +270,7 @@ def reconcile(root, now=None):
     for old, observation in observations:
         cleanup = None
         cleanup_observation = None
+        late = None
         old_run = old["runs"][old["run_id"]]
         expected_execution = {
             "task_id": old["taskId"],
@@ -284,16 +290,21 @@ def reconcile(root, now=None):
                 step = "command_processes"
                 children = run_commands(projects[old["projectId"]], old_run.get("worker_process_baseline"))
                 if actual["agent_status"] in ("idle", "done") and not children:
-                    cleanup = {
-                        "task_id": old["taskId"],
-                        "run_id": old["run_id"],
-                        "session_id": native["id"],
-                        "result_hash": runner.digest(observation["result"]),
-                        "agent_hash": runner.digest(actual),
-                        "child_processes": children,
-                        "process_baseline_hash": runner.digest(old_run["worker_process_baseline"]),
-                        "at": timestamp(),
-                    }
+                    if observation["result"].get("reason") == "time_budget":
+                        from execution.late_result import collect
+                        step = "late_completion"
+                        late = collect(root, old, projects[old["projectId"]], actual, native)
+                    if not late:
+                        cleanup = {
+                            "task_id": old["taskId"],
+                            "run_id": old["run_id"],
+                            "session_id": native["id"],
+                            "result_hash": runner.digest(observation["result"]),
+                            "agent_hash": runner.digest(actual),
+                            "child_processes": children,
+                            "process_baseline_hash": runner.digest(old_run["worker_process_baseline"]),
+                            "at": timestamp(),
+                        }
                 else:
                     cleanup_observation = {
                         "reason": "commands_still_running" if children else "agent_not_idle",
@@ -308,6 +319,8 @@ def reconcile(root, now=None):
                     "error_type": type(error).__name__,
                     "at": timestamp(),
                 }
+                if step == "late_completion":
+                    cleanup_observation["detail"] = str(error)
         elif (
             observation.get("result")
             and runner.result_status(observation["result"]) == "blocked"
@@ -319,8 +332,32 @@ def reconcile(root, now=None):
             }
         with transaction(root) as registry:
             task = registry["tasks"][old["taskId"]]
-            if runner.digest(task) != runner.digest(old):
+            project = registry["projects"][old["projectId"]]
+            if runner.digest(task) != runner.digest(old) or runner.digest(project) != runner.digest(projects[old["projectId"]]):
                 continue
+            if late:
+                # 登记锁内再核对：旧 run、取消或新项目占用不能被迟到结果覆盖。
+                directory = Path(root) / "runs" / old["taskId"] / old["run_id"]
+                if runner.worktree_snapshot(project["worktreePath"]) != late["snapshot"] or codex.messages(late["native"]["path"])[late["intent"]["message_count_before"]:] != late["messages"] or run_commands(project, old_run["worker_process_baseline"]):
+                    continue
+                evidence_path = directory / "late-herdr-evidence.json"
+                result_path = directory / "late-result.json"
+                stored = runner.read(evidence_path)
+                if stored:
+                    # 崩溃留下的不可变收集文件须重新验证关键证据，不能覆盖或盲目采纳。
+                    keys = ("task_id", "run_id", "session_id", "original_result", "dispatch_intent", "native_final_message", "native_completion", "native_model_settings", "changed_paths", "worktree_snapshot_hash")
+                    if any(stored.get(key) != late["evidence"].get(key) for key in keys):
+                        continue
+                    stored_result = runner.read(result_path)
+                    if stored_result and stored_result.get("artifacts") != late["result"]["artifacts"]:
+                        continue
+                    if stored_result:
+                        late["result"] = stored_result
+                    late["evidence"] = stored
+                runner.atomic_json(evidence_path, late["evidence"], immutable=True)
+                runner.atomic_json(result_path, late["result"], immutable=True)
+                task["runs"][old["run_id"]]["late_result"] = runner.summary(result_path)
+                observation = {"observed": "late_result", "result": late["result"], "result_path": str(result_path)}
             task["last_checked"] = timestamp()
             task["observation"] = observation["observed"]
             task["observation_evidence"] = {key: value for key, value in observation.items() if key != "result"}
@@ -348,7 +385,7 @@ def reconcile(root, now=None):
             # 每个阶段只产生稳定提醒；扫描与通知退避相互独立，不无限重发。
             since = epoch(task.get("status_changed_at", task["runs"][rid]["started_at"]))
             timeout = task.get("review_timeout", 1800)
-            if task["status"] in ("ready_for_review", "blocked", "needs_reconciliation", "verified", "rework") and now - since >= timeout:
+            if task["status"] in ("ready_for_review", "blocked", "needs_reconciliation", "verified", "rework") and now - since >= timeout and not handled_failure(root, registry, task):
                 phase = "review_overdue" if task["status"] == "ready_for_review" else task["status"] + "_overdue"
                 task["attention_required"] = phase
                 runner.emit(registry, task, phase)
