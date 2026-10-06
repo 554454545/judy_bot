@@ -81,6 +81,7 @@
 - 每项目长期 worktree 和一个固定 Agent session，多个任务串行复用；Herdr Agent 和 Coding Agent 会话名为 `herdr-项目名`，真实 session ID 另存，不用名字冒充 ID。测试项目源目录为 `/home/judy/workspace/test`；长期 worktree 放本项目 `.worktrees/`（Git 忽略），具体目录、工作分支与基准由登记和调用参数指定，不写死在实现中。新 Codex 配置、会话和日志放在本项目内，只读本项目现有认证，不迁移全局凭据。
 - 仅修改本项目和用户在具体任务中明确授权的目标。操作其他项目不改变本文件对全局 Pi 的保护边界。
 - 本次健康实验授权 `/home/judy/workspace/test` 与新目录 `/home/judy/workspace/test1`，分别五组复杂创建与多轮修改。新目录可初始化测试 Git 基线并创建项目内长期 worktree；不得覆盖既有内容。使用真实模型与 Coding Agent，允许向已配对 TG 发送测试结果。每组前台新 session，后台每项目复用一个原生 session；失败组修复后整组重跑。既有过程保留在 [re.md](re.md)，后续过程、时间、问题和验收摘要写入对应 GitHub Issue，私有证据仍留在项目运行目录；构造消息不能冒充真实 Telegram 用户入站。
+- Issue #24 修复另获授权：修复 test2 首次绑定的半成品配置；在 `/home/judy/workspace/test3`、`/home/judy/workspace/test4` 创建新项目并进行真实健康验证。新项目可初始化空 Git 基线，业务在 Bot 内长期 worktree 修改；检查跨项目独立 UUID、同项目多轮续用和前台新 session 后继续复用。保留失败尝试和既有文件，不覆盖 test/test1 的有效绑定；过程仍记录在对应 Issue。
 - 用户要求查看、诊断或评审时只检查和报告；要求修改时再实施。不恢复此前已撤回的规划。
 
 ## GitHub Issues 问题处理流程

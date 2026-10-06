@@ -206,7 +206,8 @@ def start_run(root, spec_path, prompt_path, run_id):
             for field in ("taskId", "projectId", "originalRequest", "instruction", "scope", "acceptance", "artifacts"):
                 if task.get(field) != previous.get(field):
                     raise ValueError("交接稿与已登记任务不同；不改写原话或需求")
-            clarifications = [item["request"] for item in previous.get("revisions", [])]
+            clarifications = list(previous.get("clarificationRequests", []))
+            clarifications.extend(item["request"] for item in previous.get("revisions", []))
             if task.get("clarifications", []) != clarifications:
                 raise ValueError("交接稿遗漏需求补充；停止派发")
         if previous and (rid in previous.get("runs", {}) or previous.get("iterations", 0) > 2):
@@ -442,6 +443,7 @@ def main():
     bind_parser = sub.add_parser("bind")
     bind_parser.add_argument("--project", required=True)
     bind_parser.add_argument("--settings", required=True)
+    bind_parser.add_argument("--receipt")
     run_parser = sub.add_parser("run")
     run_parser.add_argument("--spec", required=True)
     run_parser.add_argument("--prompt", required=True)
@@ -460,7 +462,21 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     if args.operation == "bind":
-        result = herdr.bind(root, read(args.project), read(args.settings))
+        try:
+            result = herdr.bind(root, read(args.project), read(args.settings))
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            if args.receipt:
+                atomic_json(args.receipt, {
+                    "state": "failed",
+                    "error": type(error).__name__ + ": " + str(error),
+                })
+            raise
+        if args.receipt:
+            atomic_json(args.receipt, {
+                "state": "ready",
+                "projectId": result["project"]["projectId"],
+                "reused": result["reused"],
+            })
     elif args.operation == "run":
         tid, rid = start_run(root, args.spec, args.prompt, args.run_id)
         result = {

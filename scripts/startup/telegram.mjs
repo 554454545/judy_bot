@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { mkdirSync, openSync, closeSync, readFileSync } from 'node:fs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -13,7 +14,10 @@ process.umask(0o077);
 mkdirSync(logDir, { recursive: true, mode: 0o700 });
 const errorLog = openSync(resolve(logDir, 'stderr.log'), 'a', 0o600);
 // Windows 的 localhost 代理在 WSL NAT 中使用默认网关；只修改本项目子进程环境。
-const childEnv = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
+const childEnv = {
+  ...process.env,
+  PATH: [dirname(process.execPath), resolve(homedir(), '.local/bin'), process.env.PATH ?? ''].join(':'),
+};
 childEnv.PYTHONDONTWRITEBYTECODE = '1';
 childEnv.TMPDIR = resolve(root, '.cache/tmp/background');
 mkdirSync(childEnv.TMPDIR, { recursive: true, mode: 0o700 });

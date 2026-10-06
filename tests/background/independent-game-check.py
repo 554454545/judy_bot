@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 def inspect(directory, phase):
+    directory = directory.resolve()
     sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location("actual_game_engine", directory / "engine.py")
     module = importlib.util.module_from_spec(spec)
@@ -84,7 +85,10 @@ def inspect(directory, phase):
     if phase >= 1:
         for text in ("{invalid", '{"version":999}', "null", '{"version":1,"tick":NaN}'):
             rejects("invalid saved data", lambda text=text: module.loads(text))
-    process = subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py", "-v"], cwd=directory, capture_output=True, text=True, timeout=120)
+    # 测试既可 import engine，也可按 README 从 worktree 根目录 import simulation.engine。
+    repository = subprocess.run(["git", "-C", str(directory), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    working_directory = Path(repository.stdout.strip()) if repository.returncode == 0 else directory.parent
+    process = subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", str(directory), "-p", "test_*.py", "-v"], cwd=working_directory, capture_output=True, text=True, timeout=120)
     check("actual worker unittest suite", process.returncode == 0)
     count = re.search(r"Ran (\d+) tests?", process.stderr)
     check("required number of real tests", count is not None and int(count.group(1)) >= 20 + phase * 10)

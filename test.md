@@ -59,6 +59,17 @@
 
 ## 5. 已积累的验证经验
 
+### 新项目首次接入与跨项目续用（Issue #24、#10）
+
+- 从获准的新空目录开始，不预先准备 worktree、Agent 配置或原生 session。用日常项目名发需求，确认授权后检查 project-register、worktree-ensure、project-bind、register/prepare/start-run/run 的真实记录。
+- 两个项目交替进行创建、存档恢复、机制修改三轮任务；每个项目保持唯一原生 UUID 与独立 CODEX_HOME，两个项目的 UUID 必须不同。换项目后再回到原项目，核对项目名、目录、分支、原话、task/run 与实际 worker session，不能只看回答提到的名字。
+- 每轮等独立验收和 TG API 签收完成后再发下一轮。核对新任务没有覆盖旧任务、原生输入一次、真实结果身份、交接 hash、允许范围及项目占用释放。
+- 再新建前台 session，原样重发上一条项目需求；核对新的 user entry/message ID 与独立任务身份，但后台仍复用该项目永久 UUID。重复正文不能借用旧消息的取证，也不能新开后台 session。
+- 先提需求、再问清边界、再回复“确认”；检查 sourceEntryIds 选择最初问题，确认及澄清单独保留，最终引用不能只指向“确认”。穿插无关问答、分支切换、同文消息与其他 chat/thread 时不能串原话。
+- 无效参数和缺少认证必须明确失败，不能提前留下不完整执行配置。失败重试不新建替代 UUID；有效已绑定项目继续保护原参数。入口：tests/background/project-onboarding.py、project-onboarding-live.mjs；单次结果写对应 GitHub Issue。
+- 首次命名不能只看终端输入成功：核对原生 UUID、`thread/name/set` 回读及实际数据库名字一致，不新增用户输入或会话。额度提醒不能接走自动输入而切换模型；每次核对 `herdr-evidence.json.native_model_settings` 与登记参数，恢复仍使用原 UUID。
+- 网络流断开后允许原生有限重试，但不得重派同一业务输入；核对 `native_input_count=1`、真实最终 marker、结果和通知签收，失败仍保留。
+
 ### 模型缓存对照用例
 
 新 session 依次发送 `1 + 1 =`、`2 + 2 = ？`、`3 + 3 = ？`、`4 + 4 = ？`、`5 + 5  = ？`、`6 + 6  = ？`，最后再发 `1 + 1 =`。比较模型时使用相同入口、System Prompt、工具和 thinking 设置；分别记录每轮总输入、缓存命中与传输续接。各组 session key、召回结果、回答和执行时间仍有差异，少量样本不能证明哪一个模型的命中率更高。

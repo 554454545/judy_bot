@@ -154,6 +154,96 @@ try {
   assert.deepEqual(confirmed.displaySummary, prepared.summary);
   globalThis[key].abandonBackgroundReview();
 
+  // 初始问题、确认和跨前台 session 的补充应一起计费，耗时仍从初始问题开始。
+  install();
+  const confirmation = context("confirmation");
+  await emit("session_start", {}, confirmation);
+  const confirmDate = Math.floor(wallNow() / 1000);
+  const confirmMessage = {
+    message_id: 2,
+    chat: { id: 123 },
+    date: confirmDate,
+    text: "确认继续",
+  };
+  const confirmTurn = {
+    chatId: 123,
+    queueOrder: 2,
+    replyToMessageId: 2,
+    sourceMessageIds: [2],
+  };
+  globalThis[key].clock("getUpdates", new Date(wallNow()).toUTCString());
+  globalThis[key].inbound({ update_id: 2, message: confirmMessage }, "getUpdates_api_confirmation");
+  globalThis[key].enqueue(confirmTurn, [confirmMessage]);
+  globalThis[key].dispatch(confirmTurn);
+  await emit("input", {}, confirmation);
+  const confirmId = records.findLast(entry => entry.stage === "telegram_turn_start").telegramTurnId;
+  request("confirmation-request", 30, 20, 2, confirmation);
+  const confirmText = globalThis[key].decorateFinalText(confirmTurn, "已确认");
+  await globalThis[key].delivery(confirmTurn, () => globalThis[key].transport("sendMessage", { text: confirmText }, async () => ({ message_id: 9 })));
+  const confirmationSource = {
+    sessionId: "confirmation",
+    telegram: {
+      turnId: confirmId,
+      messageId: 2,
+      chatId: 123,
+      sentAt: new Date(confirmDate * 1000).toISOString(),
+    },
+  };
+  const multiple = identity("multiple-origins");
+  register(multiple);
+  registry.tasks[multiple.taskId].clarificationRequests = [confirmationSource];
+  registry.tasks[multiple.taskId].revisions = [{ request: confirmationSource }];
+  fs.writeFileSync(path.join(root, "registry.json"), JSON.stringify(registry));
+  await globalThis[key].beginBackgroundReview(multiple, review);
+  await emit("message_start", { message: { role: "custom", details: multiple.details } }, review);
+  request("multiple-review", 90, 80, 4, review);
+  const multipleResult = await globalThis[key].prepareBackgroundDelivery(multiple, review);
+  assert.equal(multipleResult.summary.usage.uncachedInput, 120);
+  assert.equal(multipleResult.summary.usage.output, 30);
+  assert.equal(multipleResult.summary.requestIds.length, 4);
+  assert(multipleResult.summary.elapsedMs >= early);
+  const multipleMetadata = JSON.parse(fs.readFileSync(path.join(root, "runs", multiple.taskId, multiple.runId, "final-report-receipt.json"))).observability;
+  assert.equal(multipleMetadata.originSources.length, 2);
+  assert.deepEqual(multipleMetadata.sourceClock, JSON.parse(fs.readFileSync(path.join(proofDirectory, "final-report-receipt.json"))).observability.sourceClock);
+  globalThis[key].abandonBackgroundReview();
+  const missingOrigin = identity("missing-origin");
+  register(missingOrigin);
+  registry.tasks[missingOrigin.taskId].clarificationRequests = [{
+    ...confirmationSource,
+    sessionId: "missing-source-session",
+  }];
+  fs.writeFileSync(path.join(root, "registry.json"), JSON.stringify(registry));
+  await globalThis[key].beginBackgroundReview(missingOrigin, review);
+  await emit("message_start", { message: { role: "custom", details: missingOrigin.details } }, review);
+  request("missing-origin-review", 90, 80, 4, review);
+  const unknownResult = await globalThis[key].prepareBackgroundDelivery(missingOrigin, review);
+  assert.equal(unknownResult.summary.completeEvidence, false);
+  assert.equal(unknownResult.summary.usage.uncachedInput, null);
+  assert.equal(unknownResult.summary.usage.output, null);
+  globalThis[key].abandonBackgroundReview();
+
+  const deletedSource = identity("deleted-source-after-restart");
+  register(deletedSource);
+  await globalThis[key].beginBackgroundReview(deletedSource, review);
+  await emit("message_start", { message: { role: "custom", details: deletedSource.details } }, review);
+  request("deleted-source-review-before", 90, 80, 4, review);
+  const backup = file(original) + ".temporarily-missing";
+  fs.renameSync(file(original), backup);
+  try {
+    install();
+    await emit("session_start", {}, resumed);
+    await globalThis[key].beginBackgroundReview(deletedSource, resumed);
+    await emit("message_start", { message: { role: "custom", details: deletedSource.details } }, resumed);
+    request("deleted-source-review-after", 90, 80, 4, resumed);
+    const unknownSource = await globalThis[key].prepareBackgroundDelivery(deletedSource, resumed);
+    assert.equal(unknownSource.summary.completeEvidence, false);
+    assert.equal(unknownSource.summary.usage.uncachedInput, null);
+    assert.equal(unknownSource.summary.usage.output, null);
+  } finally {
+    fs.renameSync(backup, file(original));
+    globalThis[key].abandonBackgroundReview();
+  }
+
   // 尚未准备正文就重启，按实际持久请求恢复，不能只统计重启后的请求。
   const restart = identity("unprepared-restart");
   register(restart);
@@ -231,7 +321,7 @@ try {
   const result = {
     at: new Date(wallNow() + 8 * 3600000).toISOString().replace("Z", "+08:00"),
     passed: true,
-    cases: ["same-boot monotonic timing", "24-hour local wall-clock jump", "cross-session origin", "request/tool deduplication", "unrelated chat exclusion", "control object identity", "prepared receipt frozen across restart", "unprepared restart recovery", "Python/Node clock compatibility", "unknown cache and response", "uncalibrated local clock unknown", "reboot without calibration unknown", "reboot with fresh Telegram calibration", "execution/review/delivery stage boundaries", "user preemption"],
+    cases: ["same-boot monotonic timing", "24-hour local wall-clock jump", "cross-session origin", "selected clarification/revision turns and original clock", "missing originating turn evidence", "request/tool deduplication", "unrelated chat exclusion", "control object identity", "prepared receipt frozen across restart", "unprepared restart recovery", "Python/Node clock compatibility", "unknown cache and response", "uncalibrated local clock unknown", "reboot without calibration unknown", "reboot with fresh Telegram calibration", "execution/review/delivery stage boundaries", "user preemption"],
     liveModelCalls: 0,
     liveTelegramMessages: 0,
   };

@@ -18,6 +18,9 @@ const handlers = new Map();
 const pi = {
   events: new EventEmitter(),
   getThinkingLevel: () => "low",
+  appendEntry(type, data) {
+    ctx.sessionManager.appendCustomEntry(type, data);
+  },
   on(name, handler) {
     const listeners = handlers.get(name) ?? [];
     listeners.push(handler);
@@ -31,6 +34,7 @@ function emit(name, event, context) {
 }
 const ctx = { sessionManager: SessionManager.inMemory(root) };
 const capture = feature.createOriginalRequestCapture(pi);
+feature.registerOriginalRequestEvidence(pi);
 const observer = observations.registerTelegramTurnObservability(pi, () => {});
 for (const handler of handlers.get("session_start")) {
   await handler({}, ctx);
@@ -92,6 +96,13 @@ try {
   assert.equal(ctx.sessionManager.getEntry(original.entryId).message.content[0].text, first.decorated);
   emit("agent_end", {}, ctx);
   assert.deepEqual(capture(ctx), original);
+  const preserved = ctx.sessionManager.getBranch().filter(entry => entry.type === "custom"
+    && entry.customType === feature.REQUEST_ENTRY_TYPE);
+  assert.equal(preserved.length, 1, "没有 bash 的澄清回合也保存真实来源");
+  assert.deepEqual(preserved[0].data.originalRequest, original);
+  emit("agent_end", {}, ctx);
+  assert.equal(ctx.sessionManager.getBranch().filter(entry => entry.type === "custom"
+    && entry.customType === feature.REQUEST_ENTRY_TYPE).length, 1, "重试不重复保存来源");
   const stale = {
     sessionId: ctx.sessionManager.getSessionId(),
     turnId: "stale-turn",

@@ -53,7 +53,19 @@ def agent(settings, binding):
     return data
 
 
+def ready_agent(settings, project):
+    data = agent(settings, project["herdr"])
+    value = data["result"]["agent"]
+    if value.get("agent") != project["agentKind"] or Path(value.get("cwd", "")).resolve() != Path(project["worktreePath"]).resolve():
+        raise ValueError("Herdr Agent 类型或工作目录与项目不同；不接管")
+    if value.get("agent_status") not in ("idle", "done"):
+        raise ValueError("Herdr Agent 尚未就绪：" + str(value.get("agent_status")) + "；保留原绑定，不新建替代会话")
+    return data
+
+
 def bind(root, project, settings):
+    if os.environ.get("HERDR_ENV") != "1":
+        raise ValueError("首次绑定必须由项目 Herdr 的真实 Shell 执行；前台使用 project-bind")
     project = copy.deepcopy(project)
     name = "herdr-" + project["projectId"]
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):
@@ -72,14 +84,12 @@ def bind(root, project, settings):
         if project["agentKind"] != "codex":
             raise ValueError("当前执行阶段仅验证 codex；其他 Agent 类型尚未接入")
         previous_settings = old.get("executionSettings") if old else None
-        if previous_settings:
-            agent_options = {
-                **previous_settings["agent"],
-                **settings.get("agent", {}),
-            }
-        else:
-            # 先解析并校验默认参数，再写执行绑定，避免无效配置留下错误快照。
-            agent_options = codex.options(settings.get("agent", {}))
+        previous_agent = (previous_settings or {}).get("agent", {})
+        agent_options = default_settings.runtime_options(project, {
+            **previous_agent,
+            **settings.get("agent", {}),
+        })
+        agent_options = codex.options(agent_options)
         settings = {
             **settings,
             "agent": agent_options,
@@ -89,17 +99,31 @@ def bind(root, project, settings):
                 if old[field] != project[field]:
                     raise ValueError("项目绑定变化；不自动改绑")
             if previous_settings is not None and previous_settings != settings:
-                raise ValueError("项目执行配置变化；不自动覆盖")
-            if previous_settings is None:
-                old["executionSettings"] = settings
+                # 只补齐还没有 pane/session 的失败首次绑定；已有字段和真实绑定不能改写。
+                incomplete = not all(previous_agent.get(key) for key in ("home", "binary", "authFile", "baseUrl"))
+                compatible = all(settings.get(key) == value for key, value in previous_settings.items() if key != "agent")
+                compatible = compatible and all(agent_options.get(key) == value for key, value in previous_agent.items())
+                if old.get("herdr") or old.get("sessionId") or old.get("activeExecution") or not incomplete or not compatible:
+                    raise ValueError("项目执行配置变化；不自动覆盖")
         else:
             old = copy.deepcopy(project)
-            old["executionSettings"] = settings
-            registry["projects"][project["projectId"]] = old
+        for other in registry["projects"].values():
+            if other["projectId"] != project["projectId"] and (other.get("executionSettings") or {}).get("agent", {}).get("home") == agent_options["home"]:
+                raise ValueError("不同项目不能共用 Coding Agent 运行目录或 session")
         old = copy.deepcopy(old)
+    # 参数、认证和既有原生配置都检查成功后，才保存完整执行配置。
+    environment = codex.prepare(settings["agent"], project["worktreePath"])
+    with transaction(root) as registry:
+        current = registry["projects"].get(project["projectId"])
+        if current is not None and current != old:
+            raise ValueError("配置校验期间项目绑定变化；停止绑定")
+        if current is None:
+            registry["projects"][project["projectId"]] = copy.deepcopy(old)
+        registry["projects"][project["projectId"]]["executionSettings"] = settings
+        old = copy.deepcopy(registry["projects"][project["projectId"]])
     binding = old.get("herdr")
     if binding and binding.get("agent_name"):
-        current = agent(settings, binding)
+        current = ready_agent(settings, old)
         return {
             "project": old,
             "agent": current,
@@ -112,7 +136,6 @@ def bind(root, project, settings):
         existing = require(settings, "agent", "list")["result"]["agents"]
         if any(item.get("agent_name") == name or item.get("name") == name for item in existing):
             raise ValueError("已有同名 Agent，但没有本项目的绑定证据；不接管")
-        environment = codex.prepare(settings["agent"], project["worktreePath"])
         known = codex.sessions(settings["agent"]["home"], project["worktreePath"])
         if len(known) > 1:
             raise ValueError("同一项目存在多个 Codex session；不猜测或新建会话")
@@ -147,15 +170,14 @@ def bind(root, project, settings):
         with transaction(root) as registry:
             registry["projects"][project["projectId"]]["herdr"] = binding
     known = codex.sessions(settings["agent"]["home"], project["worktreePath"])
-    resume_arguments = ["resume", known[0]["id"]] if len(known) == 1 else []
+    resume_arguments = codex.launch_arguments(settings["agent"], known[0]["id"] if len(known) == 1 else None)
     if len(known) > 1:
         raise ValueError("同一项目存在多个 Codex session；不新建替代会话")
     if known:
         codex.check_writer_lock(settings["agent"]["home"], known[0]["id"])
     started = command(
         settings, "agent", "start", name, "--kind", project["agentKind"], "--pane", binding["pane_id"],
-        "--timeout", "90000", "--", *resume_arguments, "--no-daemon", "--no-alt-screen", "--strict-config",
-        "--dangerously-bypass-approvals-and-sandbox", timeout=100,
+        "--timeout", "90000", "--", *resume_arguments, timeout=100,
     )
     # blocked / unknown 的真实启动证据也留下；由操作者检查，不猜测已就绪。
     with transaction(root) as registry:
@@ -168,7 +190,7 @@ def bind(root, project, settings):
         bound = copy.deepcopy(registry["projects"][project["projectId"]])
     return {
         "project": bound,
-        "agent": agent(settings, bound["herdr"]),
+        "agent": ready_agent(settings, bound),
         "reused": False,
     }
 
@@ -224,6 +246,7 @@ def supervise(root, timeout):
     if digest(prompt.encode()) != task["runs"][rid]["dispatch_hash"]:
         raise ValueError("派发文件已变化；停止执行")
     previous_messages = codex.messages(native["path"]) if native else []
+    previous_settings = codex.turn_settings(native["path"]) if native else []
     from execution.health import worker_processes
     process_baseline = worker_processes(project)
     with transaction(root) as registry:
@@ -256,9 +279,10 @@ def supervise(root, timeout):
     if native and native_after["id"] != native["id"]:
         raise ValueError("任务执行期间 session 被替换")
     if not native:
-        rename = require(settings, "agent", "prompt", binding["agent_name"], "/rename " + binding["session_name"])
+        rename = codex.set_title(settings["agent"], project["worktreePath"], native_after["id"], binding["session_name"])
         atomic_json(directory / "session-rename.json", rename, immutable=True)
     native = native_after
+    actual_settings = codex.turn_settings(native["path"])[len(previous_settings):]
     messages = codex.messages(native["path"])[len(previous_messages):]
     inputs = [index for index, item in enumerate(messages) if item["role"] == "user" and item["text"] == prompt]
     assistant = []
@@ -284,6 +308,7 @@ def supervise(root, timeout):
         "prompt_result": result,
         "after": after,
         "native_input_count": len(inputs),
+        "native_model_settings": actual_settings,
         "native_final_message": final,
         "changed_paths": changed,
         "outside_scope": outside,
@@ -298,6 +323,8 @@ def supervise(root, timeout):
         raise ValueError("缺少本次真实输入或最终 assistant 回复标记；不使用 prompt 回显")
     if evidence["session_name"] != binding["session_name"]:
         raise ValueError("实际 Codex 会话名与项目约定不同")
+    if not actual_settings or any(item["model"] != settings["agent"]["model"] or item["effort"] != settings["agent"]["reasoningEffort"] for item in actual_settings):
+        raise ValueError("本次 Codex 原生调用参数与项目登记不同；保留真实参数证据")
     business = read(directory / "business.json", {})
     if business.get("task_id") != tid or business.get("run_id") != rid:
         raise ValueError("业务结果缺失或身份不匹配")

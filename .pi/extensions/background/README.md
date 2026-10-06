@@ -79,6 +79,10 @@ python3 .pi/extensions/background/tasks/task_protocol.py worktree-ensure PROJECT
 
 project spec 保存 sourcePath、worktreePath、branch、agentKind，ID 由命令指定。新项目省略 agentKind 时读取 coding-agents-default-setting/defaults.json；已有项目省略时仍沿用登记的类型。既有绑定冲突拒绝覆盖；sessionId 在真实创建前为空。prepare 输出 spec/prompt 文件及当前 worktree 检查；仍保持 registered。dispatchEnabled 仅在项目已真实绑定且检查通过时为 true，表示允许显式派发，不是 Agent 接收证明。
 
+首次接入按授权完成 `project-register PROJECT --spec FILE` → `worktree-ensure PROJECT --base main` → `project-bind PROJECT`。前台只调用 tasks/task_protocol.py，bash timeout 使用 120 秒；不能直接调用 runner bind 或猜 pane。project-bind 通过 execution/dispatch.py 核对专用 Shell，真实 bind 在 Herdr 环境中执行。ready 后重新 prepare；binding 表示启动结果尚不明确，按 receipt 查询，不能自动重发。首次业务执行取得原生 UUID，随后固定复用，名字不是 UUID。
+
+新项目的 home/authFile/binary/baseUrl 与模型参数统一来自 coding-agents-default-setting/codex.json。home 支持 `{projectId}`，相对路径按 Bot 根目录解析，binary 按启动 PATH 查找；不同项目禁止共用 home。完整配置及认证预检成功后才写 executionSettings。仅对没有 Herdr/session/activeExecution 的失败首次绑定补齐缺失字段，保留已有参数；有效绑定的配置冲突仍拒绝。项目登记实现在 projects/registry.py，工作树实现在 worktrees/manage.py，不在 tasks/projects.py。
+
 start-run 校验已登记任务的原话、修订、当前交接 hash，保存不可变本次副本并占用项目。run 在 Bot 专用 Herdr 的 bot-runtime Shell pane 启动监督程序后快速返回收据；前台不等待 worker、不轮询。重复 run 或项目尚未验收时的第二个 start-run 拒绝。收据只证明命令已交给 Shell，实际输入和结果由本次证据确认。
 
 CLI 的 --root 支持相对于调用方工作目录的路径；入口立即解析绝对目录，start_run 也在生成交接路径前再次固定它。交接稿中的业务结果文件始终是绝对路径，因为原生 Agent 的 cwd 是项目 worktree。不能把 Bot 相对路径原样交给 Agent，也不为已有失败 run 移动或补造结果。
@@ -91,13 +95,13 @@ result 只返回状态、最多 1200 字符的业务摘要和私有证据路径�
 
 ## 真实原话如何进入脚本
 
-TG 授权消息实际出队时，现有观测点提供原始消息来源；source.ts 经 input/message_start 固定真实用户消息对象。工具执行前的官方 tool_call 事件保证 SessionManager 已同步到当前 assistant 调用；首次 bash 前通过 pi.appendEntry 保存 background-original-request 私有条目，同一用户条目不重复保存。该条目不进入模型上下文。
+TG 授权消息实际出队时，现有观测点提供原始消息来源；source.ts 经 input/message_start 固定真实用户消息对象。工具执行前的官方 tool_call 事件保证 SessionManager 已同步到当前 assistant 调用；首次 bash 前通过 pi.appendEntry 保存 background-original-request 私有条目。agent_end 也保存尚未取证的用户条目，避免只问澄清、没有 bash 的回合丢失 TG 身份；同一用户条目不重复保存。该条目不进入模型上下文。
 
 Pi 自带 bash 为每次子进程设置 PI_SESSION_ID 和 PI_SESSION_FILE。脚本从当前 session 文件按 parentId 追踪当前分支，核对最近真实 user entry 和取证条目身份；原始 TG text、message/chat/thread/turn ID 和发送时间来自实际入站消息，进入 Pi 时间来自实际用户条目。模型在 spec/delta 填写的原话会被运行时证据覆盖。
 
 普通独立 CLI 不具备 Pi 环境，调用者必须在 spec 提供 originalRequest，update 提供 changeRequest，负责真实性；不会从整理需求补造原话。原话证据是合作写入协议，不声称能抵御具有完整文件修改权限的恶意调用者。
 
-仍只支持单条纯文本；合并消息、附件、首次登记前跨多轮澄清未完整接入。不支持输入明确拒绝登记，不借用旧原话。普通对话不会登记任务；bash 取证条目留在当前 session，不另建原话日志或额外模型提示。
+单条纯文本按本轮取证。首次登记前跨多轮澄清时，spec.sourceEntryIds 明确选择相关 user entry，脚本验证当前分支、session 与 TG chat/thread，并自动包括当前消息；最初问题保存为 originalRequest，后续相关消息保存为 clarificationRequests，prepare 将其与 revisions 一起放入交接。普通问答和其他项目消息不能自动归入任务。合并消息、附件仍未接入；不支持输入明确拒绝登记，不借用旧原话。bash 取证条目留在当前 session，不另建原话日志或额外模型提示。
 
 ## 已授权行为的保护
 
@@ -108,6 +112,8 @@ update 使用同一登记锁比较 expected-hash，保存补充原话/旧需求�
 ## 验证入口
 
 本地模块与原话检查在 tests/background/preparation.py、worktree-management.py、request-recording.py、request-source.mjs；安装版 Pi 的 bash/session 与 CLI 验证在 pi-cli.mjs（替代旧 pi-tools.mjs）。真实模型的隔离 TG 模拟入口为 frontend-cli-flow.mjs，结果和完整请求保存在该次 session 私有目录；不发送真实 Telegram 消息，不启动 Herdr。测试与现有运行实例重载是不同事实，证据分别记录。
+
+新项目首次接入回归在 tests/background/project-onboarding.py；真实全链路入口为 project-onboarding-live.mjs。首次从两个获准空目录开始，交替完成创建、存档与机制修改，核对独立 UUID、CODEX_HOME 和永久会话续用。失败后 `--resume-bindings` 仅复用上一尝试的真实项目绑定，前台重新开 session、业务另用新目录，保留旧结果。`--repeat-only --business-directory DIR` 原样重发既有需求；`--clarification-only` 验证先澄清、穿插问答、确认后仅准备。两者沿用原绑定。驱动的 TG 用户入站为构造消息，前台模型、Herdr/Codex、独立验收和 Telegram API 投递为真实调用；不能冒充手机入站或手机接收回执。详细过程与通过范围记录在对应 Issue，原始证据留在私有 verification/project-onboarding/。
 
 ## 执行实现与独立入口
 
@@ -137,6 +143,10 @@ tests/background/real-herdr-execution.py
 复用范围：Joye 的 digest、summary、pid_identity、start_run、run_command、commit_result、result_status、verify，以及稳定 task/run/phase outbox、flock/原子保存和不可变结果。保持 starting/running/ready_for_review/verified/blocked/rework/needs_reconciliation/batch_finished 等原有语义；不增加模型工具、新 Skill 或另一份正式登记表。notify/relay/watchdog/report 已接入，真实投递凭据与独立验收缺一不可。
 
 用户指定适配：长期 worktree/固定 session；Herdr Agent 与 Codex 原生会话均命名 `herdr-项目名`，真实 UUID 另存；同项目执行及待验收任务通过 activeExecution 串行约束；本地配置与北京时间。Herdr 名字受官方 `[a-z][a-z0-9_-]{0,31}` 限制，不悄悄截断或改名。
+
+首次业务执行形成原生 rollout 后，`execution/codex.py` 使用安装版 Codex 0.160.0 的 [官方 `thread/name/set`](https://learn.chatgpt.com/docs/app-server) 命名。临时 stdio 客户端只读取摘要、设置已核对 UUID 的名字并回读，不 start/resume/turn，不向 TUI 输入 `/rename`，不改写原生 SQLite。完成或失败均关闭该临时客户端，保留 Herdr 中的原 TUI。
+
+启动和恢复都显式使用登记的模型、思考强度、Fast 参数及 [额度模型切换提醒开关](https://learn.chatgpt.com/docs/config-file/config-reference) `notice.hide_rate_limit_model_nudge=true`，避免提醒弹窗接收自动输入。`herdr-evidence.json.native_model_settings` 记录本次原生 `turn_context` 的实际模型与思考强度；不符合登记则 blocked，不以默认配置冒充实际调用。提示关闭不改变额度或网络重试策略。
 
 输入仍为 spec.json 与 prompt.md。独立测试直接提供真实任务文件，不调用前台登记接口，不制造 TG update、Pi user entry 或原话证据。每次执行保存交接文件原字节及 hash，再生成本次 dispatch-prompt；通过 subprocess 参数数组发送文件内容，不做 Shell 字符串拼接。原登记和原交接文件不被执行阶段覆盖。
 

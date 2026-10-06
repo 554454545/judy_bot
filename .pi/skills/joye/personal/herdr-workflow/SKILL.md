@@ -18,15 +18,42 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
 - inspect 保持 Joye 的完整落盘/CLI 协议；输出给模型时用 Python/jq 提取当前项目绑定、任务 ID/status/run_id、task_hashes 与 handoff_checks，不把全表的 runs/worktree_baseline/outbox 反复输出。验收需求从当前 spec 读取，执行结果使用有界 result。
 - 登记沿用 `register TASK --spec PRIVATE_JSON`。私有 JSON 需要 `projectId`、`instruction`、`scope`、`acceptance`、`artifacts`；ID 由 TASK 指定。允许修改范围与产物使用相对 worktree 路径，需求不足时先问清楚。
-- 原话由扩展保存到当前 Pi session 的非上下文条目，脚本通过 Pi 自带的 `PI_SESSION_ID` / `PI_SESSION_FILE` 读取。模型不要填写、改写或从 instruction 补造 `originalRequest`。目前只支持单条纯文本；首次登记前跨多轮澄清未支持完整合并，应说明限制，不能声称原话完整。
+- 原话由扩展保存到当前 Pi session 的非上下文条目，脚本通过 Pi 自带的 `PI_SESSION_ID` / `PI_SESSION_FILE` 读取。模型不要填写、改写或从 instruction 补造 `originalRequest`。先提需求、再确认时，在 spec 的 `sourceEntryIds` 指定同一任务的初始需求及澄清 user entry ID；脚本逐条核对当前分支的真实取证，自动包括当前消息，按实际会话顺序保存最初原话及 clarificationRequests。不要把无关问答或其他项目需求列进去；不跨 session/chat/thread 取旧原话。
 - 登记后的需求补充沿用 `update TASK --delta PRIVATE_JSON --expected-hash HASH`；HASH 从最新 `inspect.task_hashes` 获取。delta 只包含需要修改的 instruction/scope/acceptance/artifacts，原始原话保持不变，补充原话自动留存。
-- `prepare TASK` 生成 spec.json 和 prompt.md 后，再 inspect 核对 `handoff_checks`；`preflight.dispatchEnabled` 为 true 才可进入执行。文件放在 `.pi/agent/background/tasks/TASK/`，不要直接覆盖 registry。尚未绑定的项目先报告，不私自新建替代 Agent。
+- `prepare TASK` 生成 spec.json 和 prompt.md 后，再 inspect 核对 `handoff_checks`；`preflight.dispatchEnabled` 为 true 才可进入执行。文件放在 `.pi/agent/background/tasks/TASK/`，不要直接覆盖 registry。尚未绑定的新项目按下方已授权首次接入流程完成绑定；没有授权时先报告，不给已有项目新建替代 Agent。
+- 查询或阅读 Bot 内部源码前先用 `rg --files .pi/extensions/background` 确认实际文件名。项目登记是 projects/registry.py，工作树是 worktrees/manage.py，执行绑定是 execution/herdr.py；不要猜 tasks/projects.py 等不存在的路径。
 - 用户要求实际完成项目任务时，继续 `start-run TASK --run-id RUN`，再 `run TASK RUN`。前者沿用已登记任务并校验原话、修订和交接 hash，后者快速返回 Herdr 收据；模型不要直接写项目代码、直接控制 Herdr 或在当前回合等待 worker。监督程序在项目 Herdr 的真实 Shell 环境运行。
 - 收据只表示启动命令被 Herdr 接受，不等于 Codex 已收到或做好。告知用户 task/run ID 和验收标准，后台事件会自动触发独立验收，用户也可以随后查询 `result TASK RUN`；不能在当前回合 sleep 或反复轮询。
 - 查询 `result TASK RUN` 得到有界摘要、状态和证据路径；只按验收需要读取具体文件，不能将完整 worker 对话、终端日志或 diff 塞回主 Pi。ready_for_review 后按 acceptance 实查，写私有检查证据，再 `verify TASK RUN --evidence FILE`；失败加 `--reject`。未核查不能说已验收。
 - 读取源码或测试前，先在当前任务允许的目录列出实际文件名，或核对本 run 业务结果中的实际产物；只读取已确认存在的路径。修改阶段不要求创建新测试文件，可能直接补在原测试文件内，不能根据“新机制”猜出 test_mechanisms.py 等名字。
-- 项目绑定和长期 worktree 是用户指定的本版适配：`project-register PROJECT --spec PRIVATE_JSON`、`worktree-ensure PROJECT --base BASE`。先查询已有绑定；保持同项目目录、分支和未来固定 session，保留已有修改。
+- 项目绑定和长期 worktree 是用户指定的本版适配：`project-register PROJECT --spec PRIVATE_JSON`、`worktree-ensure PROJECT --base BASE`，然后 `project-bind PROJECT`（bash timeout 120 秒）。仅在目录、Git 初始化和新 Agent 已获授权后操作。project-bind 使用集中默认配置并交给真实 Herdr Shell，前台不直接调用 runner bind 或 pane run。返回 ready 后重新 prepare；binding/失败时保留证据并报告，不能重复启动。第一次业务执行建立并登记原生 UUID，后续任务固定复用。同项目补充建新任务；换项目查对应绑定，不能沿用最近项目的 session。
+- sourceEntryIds 的真实 ID 按下方示例从 `PI_SESSION_FILE` 提取。只输出最近十条候选身份及短预览；登记时仍核对当前分支和实际取证，不自动把十条都算作需求，不从预览填写原话。
 - 当前 spec/delta 临时文件放 `.cache/tmp/background/`；沿用文件交接，不把需求正文拼到命令参数。引用本文脚本的命令从项目根目录执行。需要隔离验证时，将 `--root PRIVATE_DIR` 放在子命令之前。
+
+首次登记前若经过澄清，读取候选 ID：
+
+```bash
+python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["PI_SESSION_FILE"]) as stream:
+    rows = [json.loads(line) for line in stream if line.strip()]
+users = [row for row in rows if row.get("type") == "message"
+         and row.get("message", {}).get("role") == "user"]
+candidates = []
+for row in users[-10:]:
+    content = row["message"].get("content", [])
+    text = content if isinstance(content, str) else "".join(
+        item.get("text", "") for item in content if item.get("type") == "text"
+    )
+    candidates.append({
+        "id": row["id"],
+        "preview": text[:180],
+    })
+print(json.dumps(candidates, ensure_ascii=False))
+PY
+```
 
 查询使用下面已核对的多行 Python 例子；第二个参数换成当前明确授权的登记根目录，保留已有 inspect 协议。不要另拼复杂的一行字典，也不要安装 jq。它只显示项目身份、任务当前状态、交接 hash 与检查，不把完整 runs/worktree_baseline/outbox 注入主 Pi。
 

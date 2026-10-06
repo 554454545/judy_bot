@@ -108,7 +108,7 @@ def recover_project(root, project_id):
         raise ValueError("原 pane 不是空闲 Shell；不发送恢复命令")
     # Herdr 的持久 workspace 保留启动环境；只在原 pane resume 原 UUID。
     resumed = herdr.require(settings, "agent", "start", binding["agent_name"], "--kind", project["agentKind"], "--pane", binding["pane_id"], "--timeout", "90000", "--",
-        "resume", native[0]["id"], "--no-daemon", "--no-alt-screen", "--strict-config", "--dangerously-bypass-approvals-and-sandbox", timeout=100)
+        *codex.launch_arguments(settings["agent"], native[0]["id"]), timeout=100)
     current = herdr.agent(settings, binding)["result"]["agent"]
     with transaction(root) as registry:
         bound = registry["projects"][project_id]
