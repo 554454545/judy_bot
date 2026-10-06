@@ -17,6 +17,99 @@ from tasks import task_protocol
 
 
 class Onboarding(unittest.TestCase):
+    def readiness_fixture(self, state):
+        project = {
+            "agentKind": "codex",
+            "worktreePath": str(BOT),
+            "herdr": {
+                "agent_name": "herdr-fixture",
+                "workspace_id": "w-fixture",
+                "pane_id": "w-fixture:p1",
+            },
+        }
+        response = {
+            "cli_exit_code": 0,
+            "result": {
+                "agent": {
+                    "name": "herdr-fixture",
+                    "workspace_id": "w-fixture",
+                    "pane_id": "w-fixture:p1",
+                    "agent": "codex",
+                    "cwd": str(BOT),
+                    "agent_status": state,
+                },
+            },
+        }
+        return project, response
+
+    def test_startup_unknown_waits_and_rechecks_the_same_agent(self):
+        project, unknown = self.readiness_fixture("unknown")
+        _, idle = self.readiness_fixture("idle")
+        waited = {"cli_exit_code": 0, "result": {"state": "idle"}}
+        with patch.object(herdr, "command", side_effect=[unknown, waited, idle]) as command, patch.object(herdr.time, "monotonic", return_value=0):
+            result = herdr.ready_agent({}, project, wait_ms=90000)
+        self.assertEqual(result["result"]["agent"]["agent_status"], "idle")
+        self.assertEqual(result["startupWaitEvidence"], waited)
+        self.assertEqual(command.call_args_list[1].args[1:], (
+            "agent", "wait", "herdr-fixture", "--timeout", "90000",
+        ))
+        self.assertTrue(all(call.args[1] == "agent" for call in command.call_args_list))
+
+    def test_startup_wait_deducts_the_initial_query_time(self):
+        project, unknown = self.readiness_fixture("unknown")
+        _, idle = self.readiness_fixture("idle")
+        waited = {"cli_exit_code": 0, "result": {"state": "idle"}}
+        with patch.object(herdr, "command", side_effect=[unknown, waited, idle]) as command, patch.object(herdr.time, "monotonic", side_effect=[0, 7, 7]):
+            herdr.ready_agent({}, project, wait_ms=90000)
+        self.assertEqual(command.call_args_list[1].args[-1], "83000")
+
+    def test_startup_expired_budget_does_not_wait_again(self):
+        project, unknown = self.readiness_fixture("unknown")
+        with patch.object(herdr, "command", return_value=unknown) as command, patch.object(herdr.time, "monotonic", side_effect=[0, 91]):
+            with self.assertRaisesRegex(ValueError, "预算已用尽"):
+                herdr.ready_agent({}, project, wait_ms=90000)
+        self.assertEqual(command.call_count, 1)
+
+    def test_startup_wait_does_not_accept_blocked_or_changed_identity(self):
+        project, unknown = self.readiness_fixture("unknown")
+        _, blocked = self.readiness_fixture("blocked")
+        waited = {"cli_exit_code": 0, "result": {"state": "blocked"}}
+        observed_states = [blocked]
+        for field, value in (
+            ("name", "another-agent"),
+            ("pane_id", "other-pane"),
+            ("workspace_id", "other-workspace"),
+            ("cwd", str(BOT / ".cache")),
+            ("agent", "claude"),
+        ):
+            _, foreign = self.readiness_fixture("idle")
+            foreign["result"]["agent"][field] = value
+            observed_states.append(foreign)
+        for observed in observed_states:
+            with self.subTest(observed=observed):
+                with patch.object(herdr, "command", side_effect=[unknown, waited, observed]):
+                    with self.assertRaises(ValueError):
+                        herdr.ready_agent({}, project, wait_ms=90000)
+
+    def test_startup_wait_timeout_preserves_the_failure(self):
+        project, unknown = self.readiness_fixture("unknown")
+        expired = {"cli_exit_code": 1, "error": {"code": "agent_wait_timeout"}}
+        with patch.object(herdr, "command", side_effect=[unknown, expired]) as command:
+            with self.assertRaisesRegex(herdr.HerdrError, "agent_wait_timeout"):
+                herdr.ready_agent({}, project, wait_ms=90000)
+        self.assertEqual(command.call_count, 2)
+
+    def test_ready_or_blocked_agents_do_not_wait_or_restart(self):
+        for state in ("idle", "done", "blocked", "working"):
+            project, response = self.readiness_fixture(state)
+            with patch.object(herdr, "command", return_value=response) as command:
+                if state in ("idle", "done"):
+                    herdr.ready_agent({}, project, wait_ms=90000)
+                else:
+                    with self.assertRaises(ValueError):
+                        herdr.ready_agent({}, project, wait_ms=90000)
+            self.assertEqual(command.call_count, 1)
+
     def test_resume_preserves_registered_model_and_disables_switch_popup(self):
         arguments = codex.launch_arguments({
             "model": "saved-model",

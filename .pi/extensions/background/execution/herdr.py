@@ -48,16 +48,33 @@ def require(settings, *args, timeout=15):
 def agent(settings, binding):
     data = require(settings, "agent", "get", binding["agent_name"])
     value = data["result"]["agent"]
-    if any(value.get(field) != binding[field] for field in ("workspace_id", "pane_id")):
+    if value.get("name") != binding["agent_name"] or any(
+        value.get(field) != binding[field]
+        for field in ("workspace_id", "pane_id")
+    ):
         raise ValueError("Herdr Agent 身份与项目绑定不同；停止派发")
     return data
 
 
-def ready_agent(settings, project):
+def ready_agent(settings, project, wait_ms=0):
+    observed_at = time.monotonic()
     data = agent(settings, project["herdr"])
     value = data["result"]["agent"]
     if value.get("agent") != project["agentKind"] or Path(value.get("cwd", "")).resolve() != Path(project["worktreePath"]).resolve():
         raise ValueError("Herdr Agent 类型或工作目录与项目不同；不接管")
+    if value.get("agent_status") == "unknown" and wait_ms > 0:
+        remaining_ms = wait_ms - int((time.monotonic() - observed_at) * 1000)
+        if remaining_ms <= 0:
+            raise ValueError("Herdr 启动等待预算已用尽；保留原绑定，不新建替代会话")
+        # 启动检测可能先于状态识别；用 Herdr 原生有限等待，不重开 Agent。
+        waited = require(
+            settings, "agent", "wait", project["herdr"]["agent_name"],
+            "--timeout", str(remaining_ms), timeout=remaining_ms / 1000 + 5,
+        )
+        # 等待结果不能代替身份检查；重新核对 name/pane/cwd 和实际状态。
+        current = ready_agent(settings, project)
+        current["startupWaitEvidence"] = waited
+        return current
     if value.get("agent_status") not in ("idle", "done"):
         raise ValueError("Herdr Agent 尚未就绪：" + str(value.get("agent_status")) + "；保留原绑定，不新建替代会话")
     return data
@@ -67,6 +84,7 @@ def bind(root, project, settings):
     if os.environ.get("HERDR_ENV") != "1":
         raise ValueError("首次绑定必须由项目 Herdr 的真实 Shell 执行；前台使用 project-bind")
     project = copy.deepcopy(project)
+    startup_timeout_ms = 90_000
     name = "herdr-" + project["projectId"]
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):
         raise ValueError("herdr-项目名 不符合 Herdr 的名字限制；不自动改名")
@@ -123,7 +141,7 @@ def bind(root, project, settings):
         old = copy.deepcopy(registry["projects"][project["projectId"]])
     binding = old.get("herdr")
     if binding and binding.get("agent_name"):
-        current = ready_agent(settings, old)
+        current = ready_agent(settings, old, wait_ms=startup_timeout_ms)
         return {
             "project": old,
             "agent": current,
@@ -175,9 +193,10 @@ def bind(root, project, settings):
         raise ValueError("同一项目存在多个 Codex session；不新建替代会话")
     if known:
         codex.check_writer_lock(settings["agent"]["home"], known[0]["id"])
+    startup_deadline = time.monotonic() + startup_timeout_ms / 1000
     started = command(
         settings, "agent", "start", name, "--kind", project["agentKind"], "--pane", binding["pane_id"],
-        "--timeout", "90000", "--", *resume_arguments, timeout=100,
+        "--timeout", str(startup_timeout_ms), "--", *resume_arguments, timeout=100,
     )
     # blocked / unknown 的真实启动证据也留下；由操作者检查，不猜测已就绪。
     with transaction(root) as registry:
@@ -188,9 +207,10 @@ def bind(root, project, settings):
         raise HerdrError("agent start", started)
     with transaction(root) as registry:
         bound = copy.deepcopy(registry["projects"][project["projectId"]])
+    remaining_ms = max(0, int((startup_deadline - time.monotonic()) * 1000))
     return {
         "project": bound,
-        "agent": ready_agent(settings, bound),
+        "agent": ready_agent(settings, bound, wait_ms=remaining_ms),
         "reused": False,
     }
 
