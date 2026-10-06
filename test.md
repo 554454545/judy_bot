@@ -307,9 +307,9 @@ node tests/mail/local-inbox.mjs 在项目临时目录验证空目录、列表、
 
 ### 项目 Codex 原生会话列表快捷入口
 
-运行根目录 `./resume-codex.sh`，应直接进入 Codex 的 `Resume a previous session` 界面，不先出现项目编号菜单。检查搜索、方向键、Active/Archived、排序和退出；会话的名称、UUID、时间、归档状态须与各源 home 的原生索引一致。已登记但尚无原生 UUID 的项目不伪造列表条目。
+运行根目录 `./resume-codex.sh`，应直接进入 Codex 的 `Resume a previous session` 界面，不先出现项目编号菜单。检查搜索、方向键、Active/Archived、排序和退出；会话的名称、UUID、时间、归档状态须与各源 home 的原生索引一致。只有正式登记的 Codex `sessionId` 可进入列表：未登记 home、登记 home 中的其他 UUID、已登记但尚无原生 UUID 的项目都不显示。
 
-原生列表汇总索引位于 `.pi/agent/background/codex-session-browser/`。检查原 rollout 链接及写锁指向原项目，已有持锁客户端不被覆盖，后台项目绑定、会话 UUID、启动参数和源 SQLite 不变；重复打开应拒绝刷新正在使用的索引。不要为查看列表派发开发输入或终止已有客户端。历史归档、名称刷新、UUID/Provider 不一致拒绝的离线回归在 `tests/background/project-onboarding.py`，单次实际验证记录在 Issue #32。
+原生列表汇总索引位于 `.pi/agent/background/codex-session-browser/`。检查原 rollout 链接及写锁指向原项目，已有持锁客户端不被覆盖，后台项目绑定、会话 UUID、启动参数和源 SQLite 不变；重复打开应拒绝刷新正在使用的索引。移除登记后再次打开，应移除派生列表条目及其浏览链接，源 SQLite 和原始 rollout 保留。不要为查看列表派发开发输入或终止已有客户端。白名单筛选、登记归档、过期条目清理、名称刷新、UUID/Provider 不一致拒绝的离线回归在 `tests/background/project-onboarding.py`，单次实际验证记录在 Issue #32。
 
 ### 2026-10-05：后台 Codex 默认 gpt-6.1-sol、low、Fast
 
