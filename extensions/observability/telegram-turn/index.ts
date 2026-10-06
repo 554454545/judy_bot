@@ -101,6 +101,30 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
   }
   let telegramClockNs: bigint | undefined;
 
+  function recordTransportError(method: string, error: any) {
+    const causes = [];
+    const visited = new Set();
+    let current = error;
+    // 只保留类型及错误 code；不保存 message、URL、headers 或请求正文。
+    for (let depth = 0; current && depth < 5 && !visited.has(current); depth++) {
+      visited.add(current);
+      causes.push({
+        name: typeof current.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.name) ? current.name : "Error",
+        code: typeof current.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.code) ? current.code : null,
+      });
+      if (Array.isArray(current.errors)) {
+        for (const item of current.errors.slice(0, 8)) {
+          causes.push({
+            name: typeof item?.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.name) ? item.name : "Error",
+            code: typeof item?.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.code) ? item.code : null,
+          });
+        }
+      }
+      current = current.cause;
+    }
+    observer.runtime("transport_error", { method, causes });
+  }
+
   function receiptPath(identity: BackgroundIdentity) {
     return path.join(identity.root, "runs", identity.taskId, identity.runId, ...(identity.deliveryId ? [identity.deliveryId] : []), "final-report-receipt.json");
   }
@@ -808,27 +832,7 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
           }
           return result;
         } catch (error: any) {
-          const causes = [];
-          const visited = new Set();
-          let current = error;
-          // 只保留类型及错误 code；不保存 message、URL、headers 或请求正文。
-          for (let depth = 0; current && depth < 5 && !visited.has(current); depth++) {
-            visited.add(current);
-            causes.push({
-              name: typeof current.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.name) ? current.name : "Error",
-              code: typeof current.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.code) ? current.code : null,
-            });
-            if (Array.isArray(current.errors)) {
-              for (const item of current.errors.slice(0, 8)) {
-                causes.push({
-                  name: typeof item?.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.name) ? item.name : "Error",
-                  code: typeof item?.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.code) ? item.code : null,
-                });
-              }
-            }
-            current = current.cause;
-          }
-          observer.runtime("transport_error", { method, causes });
+          recordTransportError(method, error);
           throw error;
         }
       }
@@ -843,6 +847,7 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
           return response;
         });
       } catch (error: any) {
+        recordTransportError(method, error);
         turn.deliveryErrors.push(error?.name ?? "Error");
         record(turn, "telegram_delivery_error", {
           method,

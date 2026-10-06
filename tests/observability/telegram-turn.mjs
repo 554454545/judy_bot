@@ -64,7 +64,11 @@ let failDelivery = false;
 const client = {
   async call(method, body) {
     sent.push({ method, body });
-    if (method === "sendMessage" && failDelivery) throw new Error("Synthetic send failure");
+    if (method === "sendMessage" && failDelivery) {
+      throw new TypeError("Synthetic send failure", {
+        cause: Object.assign(new Error("Private transport URL omitted"), { code: "ECONNRESET" }),
+      });
+    }
     return { message_id: body.message_id ?? ++messageSequence };
   },
 };
@@ -212,6 +216,9 @@ try {
   failDelivery = false;
   summary = entries.findLast(entry => entry.stage === "telegram_turn_end");
   assert.equal(summary.status, "delivery_failed_or_unknown");
+  const transportError = entries.findLast(item => item.stage === "telegram_transport_error" && item.method === "sendMessage");
+  assert(transportError.causes.some(item => item.code === "ECONNRESET"));
+  assert(!JSON.stringify(transportError).includes("Private transport URL"));
 
   const longTurn = await enqueue(6);
   dispatch(longTurn);
