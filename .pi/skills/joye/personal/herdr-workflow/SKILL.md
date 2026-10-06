@@ -14,7 +14,8 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 本文件是已有 Joye Skill 的项目副本；以下适配用户指定的本地目录、长期会话和文件交接，后面的原工作流保留参考。
 
 - 操作前读取 [项目边界](../../../../../plan.md)。用户已授权接通登记到真实 Coding Agent；明确要求“先准备／先不执行”的任务仍停在 prepare。普通问答和联网查询保持前台。已接入后台自动回传、独立验收、真实 TG 通知、watchdog 和项目常驻恢复；提交、合并、推送与关闭终端仍不自动执行。
-- 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。不替未知项目猜目录，不实现用户任务代码。
+- 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。已绑定项目沿用原 sourcePath、worktree 和 session；用户明确指定的位置优先。未绑定项目只给名称或相对目录时，默认在 `/home/judy/workspace/` 下实际检查对应目录，例如 `test99/` 对应 `/home/judy/workspace/test99`；存在就使用，不再问路径，缺失再询问创建与初始化授权，普通文件冲突不覆盖。详见 [项目目标目录](../../../../../plan.md#项目目标目录)。不实现用户任务代码。
+- 健康测试内容和任务数量由用户指定，等待用户通知后执行；不自行追加测试或根据历史实验授权重新批量派发。
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
 - inspect 保持 Joye 的完整落盘/CLI 协议；输出给模型时用 Python/jq 提取当前项目绑定、任务 ID/status/run_id、task_hashes 与 handoff_checks，不把全表的 runs/worktree_baseline/outbox 反复输出。验收需求从当前 spec 读取，执行结果使用有界 result。
 - 登记沿用 `register TASK --spec PRIVATE_JSON`。私有 JSON 需要 `projectId`、`instruction`、`scope`、`acceptance`、`artifacts`；ID 由 TASK 指定。允许修改范围与产物使用相对 worktree 路径，需求不足时先问清楚。
