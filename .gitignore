@@ -1,0 +1,37 @@
+node_modules/
+*.log
+.DS_Store
+telegram.json
+settings.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pi/agent/*
+# 只保存不含凭据的 Coding Agent 默认设置；其余运行数据继续忽略。
+!.pi/agent/background/
+.pi/agent/background/*
+!.pi/agent/background/coding-agents-default-setting/
+.pi/agent/background/coding-agents-default-setting/*
+!.pi/agent/background/coding-agents-default-setting/defaults.json
+!.pi/agent/background/coding-agents-default-setting/codex.json
+.pi/npm/
+.pi/git/
+.venv/
+.cache/
+.mem0/
+outputs/
+
+# 项目包配置可追踪；实际认证和桥接配置仍留在本地。
+!.pi/settings.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+.worktrees/
+
+# 项目专用 Herdr 的官方二进制；版本与 SHA-256 记录在 scripts/startup/README.md。
+tools/herdr/herdr

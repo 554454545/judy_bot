@@ -1,0 +1,8 @@
+{
+  "purpose": "空语音产物直接返回，避免文字回复错误记录 voice-artifacts 失败",
+  "package": "@llblab/pi-telegram",
+  "version": "0.27.12",
+  "file": "lib/outbound.ts",
+  "before": "598dd313e615b909ab042a886700b002a4b8435dd3ba4437eb986daf7fea19bb",
+  "after": "99f6a90d082c2e0d3722332a2422708ec770cd4f5d87151d042afafe1ba08ca6"
+}

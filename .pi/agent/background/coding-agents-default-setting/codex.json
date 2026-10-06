@@ -1,0 +1,6 @@
+{
+  "_comment": "Codex 默认模型、思考强度和服务等级；execution/settings.py 读取，execution/codex.py 转为项目原生 config.toml。调用方明确指定的参数优先。",
+  "model": "gpt-6.1-sol",
+  "reasoningEffort": "low",
+  "serviceTier": "fast"
+}

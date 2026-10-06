@@ -1,0 +1,13 @@
+{
+	"profiles": {
+		"personal": {
+			"botToken": "REPLACE_WITH_BOT_TOKEN"
+		}
+	},
+	"assistant": {
+		"rendering": "html",
+		"activity": "quiet",
+		"draftPreviews": false,
+		"proactivePush": false
+	}
+}

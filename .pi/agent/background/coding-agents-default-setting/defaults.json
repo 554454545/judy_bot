@@ -1,0 +1,4 @@
+{
+  "_comment": "选择新项目默认使用的 Coding Agent；由 execution/settings.py 读取，项目登记和启动使用。已有绑定继续使用原 Agent。",
+  "defaultAgent": "codex"
+}
