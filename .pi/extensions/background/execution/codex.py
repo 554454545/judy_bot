@@ -1,4 +1,4 @@
-# Codex 适配与原生会话浏览：只读项目认证和源索引；关联 herdr.py、resume-codex.sh、项目 Codex home 与浏览索引。
+# Codex 适配、内部进程识别与原生会话浏览：关联 health.py、herdr.py、resume-codex.sh 和项目 Codex home。
 import argparse
 import base64
 import fcntl
@@ -17,6 +17,38 @@ from contextlib import closing
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from execution.settings import agent_options
 from storage.registry import atomic, required
+
+
+def internal_processes(identity, children):
+    # 只认原 Codex 的直接子进程及同一安装目录的真实 executable；不按 comm/命令名放行。
+    from execution.runner import pid_identity
+    if pid_identity(identity["pid"]) != identity:
+        raise ValueError("识别内部进程时原 Codex 身份变化")
+    executable = Path(f"/proc/{identity['pid']}/exe").resolve(strict=True)
+    if executable.name != "codex":
+        return []
+    host = executable.with_name("codex-code-mode-host")
+    result = []
+    for item in children:
+        if item["parent_pid"] != identity["pid"]:
+            continue
+        child = item["identity"]
+        if pid_identity(child["pid"]) != child:
+            continue
+        try:
+            actual = Path(f"/proc/{child['pid']}/exe").resolve(strict=True)
+            trusted = actual == host and actual.samefile(host)
+        except OSError:
+            continue
+        if trusted and pid_identity(child["pid"]) == child:
+            result.append({
+                **item,
+                "executable": str(actual),
+                "kind": "code_mode_host",
+            })
+    if pid_identity(identity["pid"]) != identity:
+        raise ValueError("识别期间原 Codex 身份变化")
+    return result
 
 
 def credential(path, account=None):

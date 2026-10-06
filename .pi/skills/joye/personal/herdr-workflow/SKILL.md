@@ -19,7 +19,7 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 - 健康测试内容和任务数量由用户指定，等待用户通知后执行；不自行追加测试或根据历史实验授权重新批量派发。
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
 - inspect 保持 Joye 的完整落盘/CLI 协议；输出给模型时用 Python/jq 提取当前项目绑定、任务 ID/status/run_id、task_hashes 与 handoff_checks，不把全表的 runs/worktree_baseline/outbox 反复输出。验收需求从当前 spec 读取，执行结果使用有界 result。
-- 登记沿用 `register TASK --spec PRIVATE_JSON`。私有 JSON 需要 `projectId`、`instruction`、`scope`、`acceptance`、`artifacts`；ID 由 TASK 指定。允许修改范围与产物使用相对 worktree 路径，需求不足时先问清楚。
+- 登记沿用 `register TASK --spec PRIVATE_JSON`。私有 JSON 需要 `projectId`、`instruction`、`scope`、`acceptance`、`artifacts`；ID 由 TASK 指定。允许修改范围与产物使用相对 worktree 路径；scope 的 `**/*` 表示当前 worktree 全部文件（含根目录文件），其他条目按文件/目录处理，不扩展其他通配符。需求不足时先问清楚。
 - 原话由扩展保存到当前 Pi session 的非上下文条目，脚本通过 Pi 自带的 `PI_SESSION_ID` / `PI_SESSION_FILE` 读取。模型不要填写、改写或从 instruction 补造 `originalRequest`。先提需求、再确认时，在 spec 的 `sourceEntryIds` 指定同一任务的初始需求及澄清 user entry ID；脚本逐条核对当前分支的真实取证，自动包括当前消息，按实际会话顺序保存最初原话及 clarificationRequests。不要把无关问答或其他项目需求列进去；不跨 session/chat/thread 取旧原话。
 - 登记后的需求补充沿用 `update TASK --delta PRIVATE_JSON --expected-hash HASH`；HASH 从最新 `inspect.task_hashes` 获取。delta 只包含需要修改的 instruction/scope/acceptance/artifacts，原始原话保持不变，补充原话自动留存。
 - `prepare TASK` 生成 spec.json 和 prompt.md 后，再 inspect 核对 `handoff_checks`；`preflight.dispatchEnabled` 为 true 才可进入执行。文件放在 `.pi/agent/background/tasks/TASK/`，不要直接覆盖 registry。尚未绑定的新项目按下方已授权首次接入流程完成绑定；没有授权时先报告，不给已有项目新建替代 Agent。

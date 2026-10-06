@@ -96,11 +96,13 @@ def worker_processes(project):
         raise ValueError("Coding Agent 实际进程目录不同")
     table = process_table()
     children = descendants(identity, table)
+    internal = codex.internal_processes(identity, children) if project.get("agentKind") == "codex" else []
     if runner.pid_identity(identity["pid"]) != identity:
         raise ValueError("采集期间 Coding Agent 进程被替换")
     return {
         "agent": identity,
         "children": children,
+        "internal_processes": internal,
         "at": timestamp(),
     }
 
@@ -112,7 +114,22 @@ def run_commands(project, baseline):
     if current["agent"] != baseline["agent"]:
         raise ValueError("原 Coding Agent 进程已变化；不清理新客户端的命令")
     previous = {(item["process_group"], item["session"]) for item in baseline["children"]}
-    return [item for item in current["children"] if (item["process_group"], item["session"]) not in previous]
+    previous_identities = {runner.digest(item["identity"]) for item in baseline["children"]}
+    internal = current.get("internal_processes", [])
+    internal_identities = {runner.digest(item["identity"]) for item in internal}
+    internal_groups = {(item["process_group"], item["session"]) for item in internal}
+    commands = []
+    for item in current["children"]:
+        if runner.digest(item["identity"]) in internal_identities:
+            continue
+        group = (item["process_group"], item["session"])
+        # 常驻 host 已在基线里时，同组新业务后代仍须检查；不能把整棵子树当内部进程忽略。
+        if (
+            group not in previous
+            or (group in internal_groups and runner.digest(item["identity"]) not in previous_identities)
+        ):
+            commands.append(item)
+    return commands
 
 
 def signal_identity(identity, kind):
@@ -139,9 +156,15 @@ def stop_commands(project, baseline, observed):
     anchor = process_table().get(baseline["agent"]["pid"])
     if not anchor or anchor["identity"] != baseline["agent"]:
         raise ValueError("清理前原 Agent 身份变化；停止清理")
+    current = worker_processes(project)
+    if current["agent"] != baseline["agent"]:
+        raise ValueError("清理前原 Coding Agent 进程已变化")
+    protected = {(item["process_group"], item["session"]) for item in current.get("internal_processes", [])}
     for item in observed + run_commands(project, baseline):
         if item["process_group"] == anchor["process_group"]:
             raise ValueError("新增子进程与 Agent 共用进程组；保留现场，不自动扩大清理")
+        if (item["process_group"], item["session"]) in protected:
+            raise ValueError("业务命令与 Codex 内部进程共用进程组；保留现场，不终止内部 host")
         groups[(item["process_group"], item["session"])] = item.get("group_leader")
     actions = []
 
@@ -241,16 +264,24 @@ def reconcile(root, now=None):
         observations.append((task, probe(root, task, projects[task["projectId"]], now)))
     for old, observation in observations:
         cleanup = None
+        cleanup_observation = None
         old_run = old["runs"][old["run_id"]]
+        expected_execution = {
+            "task_id": old["taskId"],
+            "run_id": old["run_id"],
+        }
         # 已持久化 cancel_intent 的 run 由取消流程收尾，watchdog 不能在 ESC 后抢先清空占用。
         if (
             not old_run.get("cancel_intent")
+            and projects[old["projectId"]].get("activeExecution") == expected_execution
             and observation.get("result")
             and runner.result_status(observation["result"]) == "blocked"
             and not any(live(old_run.get(key)) for key in ("runner_pid_identity", "pid_identity"))
         ):
+            step = "agent_identity"
             try:
                 actual, native = inspect_agent(projects[old["projectId"]])
+                step = "command_processes"
                 children = run_commands(projects[old["projectId"]], old_run.get("worker_process_baseline"))
                 if actual["agent_status"] in ("idle", "done") and not children:
                     cleanup = {
@@ -263,8 +294,29 @@ def reconcile(root, now=None):
                         "process_baseline_hash": runner.digest(old_run["worker_process_baseline"]),
                         "at": timestamp(),
                     }
-            except Exception:
-                pass
+                else:
+                    cleanup_observation = {
+                        "reason": "commands_still_running" if children else "agent_not_idle",
+                        "agent_status": actual["agent_status"],
+                        "command_processes": children,
+                        "at": timestamp(),
+                    }
+            except Exception as error:
+                cleanup_observation = {
+                    "reason": "inspection_failed",
+                    "step": step,
+                    "error_type": type(error).__name__,
+                    "at": timestamp(),
+                }
+        elif (
+            observation.get("result")
+            and runner.result_status(observation["result"]) == "blocked"
+            and projects[old["projectId"]].get("activeExecution") == expected_execution
+        ):
+            cleanup_observation = {
+                "reason": "cancellation_in_progress" if old_run.get("cancel_intent") else "supervisor_running",
+                "at": timestamp(),
+            }
         with transaction(root) as registry:
             task = registry["tasks"][old["taskId"]]
             if runner.digest(task) != runner.digest(old):
@@ -273,6 +325,8 @@ def reconcile(root, now=None):
             task["observation"] = observation["observed"]
             task["observation_evidence"] = {key: value for key, value in observation.items() if key != "result"}
             rid = task["run_id"]
+            if cleanup_observation:
+                task["runs"][rid]["failure_cleanup_observation"] = cleanup_observation
             if cleanup:
                 project = registry["projects"][task["projectId"]]
                 if project.get("activeExecution") == {"task_id": task["taskId"], "run_id": rid}:

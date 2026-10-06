@@ -70,6 +70,8 @@ python3 .pi/extensions/background/tasks/task_protocol.py verify TASK RUN --evide
 
 register 的私有 spec 需要 projectId、instruction、scope、acceptance、artifacts。update 的 delta 仅包含需要修改的 instruction/scope/acceptance/artifacts；expected-hash 从最新 inspect.task_hashes 获取。成功的 register/update 与 Joye 一样输出 null，通过退出码及随后 inspect 确认持久化。错误写 stderr 并返回非零退出码。
 
+scope 的普通条目是相对 worktree 的文件或目录，目录包括其下全部路径；`**/*` 明确表示当前 worktree 的全部文件，包括根目录文件。除此之外不扩展通配符语法。登记与执行仍拒绝绝对路径和上级跳转，不能用该范围访问其他项目。
+
 用户要求的管理操作也通过同一脚本：
 
 ```bash
@@ -208,6 +210,10 @@ execution/
 Joye relay 依赖旧版本 core patch；本项目不盲改 0.84.1 core。使用该版本公开 sendMessage/agent_settled 和 session 分支检查，按真实对象识别控制回合。非 TG 启动的本地 Pi 不消费正式通知；隔离实验显式指定自己的 owner 和数据根目录。
 
 投递失败保存 attention，不阻塞其他项目；429 按 retry_after，unknown/sending 保留现场，不能当作成功，也不能盲目重发。取消先核对原生输入和 Agent 身份，确认 Agent 空闲及监督进程退出后才释放项目。超时或未知状态不会清空占用；明确结果失败只有现场安全核对通过后才释放。retry 仅显式使用，最多两次，仍复用原 session。
+
+Codex 的内部常驻 `codex-code-mode-host` 由 execution/codex.py 核对：必须是原 Codex 的直接子进程，实际 executable 与主程序位于同一安装目录，PID 出生身份仍一致。health.py 只排除该进程本身，继续检查其业务后代；host 已在派发前基线中也不能掩盖同组新命令。取消时业务命令若与 host 共用进程组，保留占用并拒绝扩大终止范围。
+
+失败收尾受阻时，原因保存在对应 `runs[run_id].failure_cleanup_observation`：实际命令仍运行、Agent 未空闲、核对失败的阶段/错误类型、取消未收尾或监督进程仍活着。安全释放仍保存 failure_cleanup，保留旧结果、原生 UUID 和任务失败状态。针对性回归入口为 tests/background/failure-cleanup.py，使用本地真实 Linux 进程夹具，不调用模型、Herdr 或 TG。
 
 ```bash
 python3 .pi/extensions/background/tasks/task_protocol.py reconcile
