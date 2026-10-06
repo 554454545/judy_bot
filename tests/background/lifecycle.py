@@ -356,7 +356,7 @@ class Lifecycle(unittest.TestCase):
                 "agent_name": "herdr-fixture",
                 "workspace_id": "w-example",
                 "pane_id": "w-example:p-example",
-                "runs": {"run-1": {"result_path": "offline-result"}},
+                "runs": {"run-1": {"result_path": str(self.root / "runs/complex/run-1/result.json")}},
             }
             self.eid = runner.emit(registry, registry["tasks"]["complex"], "ready_for_review")
         self.event = runner.read(self.root / "registry.json")["outbox"][self.eid]

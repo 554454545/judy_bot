@@ -37,6 +37,7 @@
   execution/dispatch.py       Herdr Shell 异步启动收据和有界结果查询
   execution/runner.py         task/run、进程证据、不可变结果和独立验收
   execution/herdr.py          核对真实 Agent、派发、内置等待和原生回复取证
+  execution/late_result.py    超时后核对原生收尾，保留旧失败并收集迟到结果
   execution/codex.py          项目原生配置、认证连接和会话识别
   execution/settings.py       集中默认配置读取
 
@@ -229,6 +230,14 @@ Windows 既有入口启动本项目 service；服务异常退出由 telegram.mjs
 取消须同时确认 Codex 停止回答、本 run 新启动的命令退出、监督进程退出，才释放占用。herdr.py 在实际派发前保存 worker_process_baseline；health.py 用真实 pane foreground PID、内核 start_ticks/boot_id 与子进程组核对，只清理本轮新增的独立组，保留 Agent 和基线中的既有服务。当前 x86_64 WSL Python/libc 缺少 pidfd_open 包装，使用本机头文件核对的 Linux syscall 434 与 pidfd_send_signal；其他架构或身份不明时明确拒绝，保留占用。缺少基线的旧 run 也不盲目清理。ESC 返回 idle 本身不足以证明命令结束。
 
 失败释放同样需要原 Agent 空闲、监督进程退出、基线证明无本轮遗留命令；有 cancel_intent 时只由取消流程收尾，watchdog 不抢先释放。registered 重试不会读取旧 run 结果覆盖新准备状态。最多两次显式重试，旧 run 与证据保留。
+
+Herdr 等待超时后，原 `result.json` 不改写。若原任务仍占用项目执行位置、监督进程已退出、原 Agent 已空闲且无本轮遗留命令，`late_result.py` 核对派发 hash、唯一原生输入、同一 session/turn 的最终独立 marker、`task_complete`、实际模型参数、业务身份和新产物范围，再执行一次有界的 Herdr `agent wait`（只观察，不发新 prompt）。核对完成后持久化 `late-herdr-evidence.json` 和 `late-result.json`，将当前结果指针转向迟到结果并进入原 `ready_for_review`。仍占用项目，直到独立验收或显式取消；证据不足则保留 blocked 与具体收集阶段，不补造成功。旧 run 已释放并出现后续任务时不自动采用历史迟到产物。
+
+迟到结果的退出码来自新的真实 wait 进程，原监督的退出码、stderr 和超时证据完整保留。迟到交付保存到本 run 的 `late-<结果 hash 前16位>/`，正文、回执、发送 event_id 与观测元数据独立于旧失败通知；原问题引用保持不变。原生完成耗时使用 Codex `task_complete.duration_ms`，并记录来源，不能把原来耗尽的监督等待时间当成完整开发耗时。
+
+已成功发送且有匹配 sender 账本和 handled 文件的同一 blocked 结果，不再产生或消费 `blocked_overdue`。新结果、状态重新进入、绑定变化和 unknown/sending 不复用旧签收；未知状态仍需对账。
+
+交接稿和主 Pi 验收同时要求 instruction/acceptance 覆盖用户原话及明确补充，不擅自降低目标。可运行、测试通过和 worker 自述不代替原目标验收；无法达到或验证的部分需要拒绝验收并说明差距，改变目标须有用户明确同意。
 
 发送账本 sending/unknown 需要人工对账；inbox 的 delivery_unknown 不会因自己的回复改变 leaf、租约到期或新用户分支而自动领取重发。只有明确未发送的本地冷却等失败才按记录退避重试。这保证不盲目重复投递，并不保证未知网络请求实际未送达。
 

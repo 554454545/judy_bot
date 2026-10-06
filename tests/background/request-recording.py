@@ -122,6 +122,8 @@ with tempfile.TemporaryDirectory(prefix=".bot-background-recording-", dir=BOT.pa
     prompt = Path(prepared["task"]["files"]["prompt"]).read_bytes()
     assert supplement["text"].encode() in prompt
     assert b"another-agent" in prompt
+    assert "不得自行降低目标".encode() in prompt
+    assert "可运行、测试通过或 worker 自述完成不等于原目标达到".encode() in prompt
 
     # 两个不同 CLI 写者拿到同一个旧 hash；只有一个成功，另一个必须重新核对。
     expected = module.inspect(root)["taskHashes"][task["taskId"]]

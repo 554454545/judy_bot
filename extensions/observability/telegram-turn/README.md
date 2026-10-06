@@ -13,7 +13,7 @@
 
 Pi 加载现有 `extensions/observability/index.ts`，该入口调用 `registerTelegramTurnObservability()`。本目录没有作为第二个独立扩展加载，辅助文件也不会逐个自动注册。
 
-现有上下文总入口和记忆来源循环各增加一个计时调用，仍使用原来的组装顺序。其余实现都在本目录。验证代码按项目约定放在 `tests/observability/telegram-turn.mjs`，结果放在 `.pi/agent/logs/observability/telegram-turn-verification.json`。
+现有上下文总入口和记忆来源循环各增加一个计时调用，仍使用原来的组装顺序。观测与维护补丁在本目录；前台回复策略在 `src/telegram/final-reply-only.ts`。验证代码按项目约定放在 `tests/observability/telegram-turn.mjs`，结果放在 `.pi/agent/logs/observability/telegram-turn-verification.json`。
 
 ## 尾部数字的口径
 
@@ -101,6 +101,12 @@ node extensions/observability/telegram-turn/patch.mjs
 
 Pi 事件口径依据 [0.84.1 官方扩展说明](https://github.com/earendil-works/pi/blob/v0.84.1/packages/coding-agent/docs/extensions.md) 和项目安装版源码；以后调整接口时先核对安装版本。
 
+## 输入状态与网络诊断
+
+`src/telegram/final-reply-only.ts` 对后台控制回合隐藏模型正文，但向安装版桥接传递空 messages 的 `agent_end`，让其照常停止 typing、清理活动状态并接续队列。不能通过跳过整个事件隐藏正文，否则会留下定时器。`patch.mjs` 同时维护 typing 的观察点和 capability-monitor 的会话代次围栏：停止后到达的 getMe 结果、能力转换内部 await 的后续步骤不能访问旧 ctx；新 session 可以建立自己的检查。
+
+同一 session 观测文件可查 `telegram_typing_start`、`telegram_typing_stop`、`telegram_typing_api_confirmed` 和 `telegram_transport_error`。网络失败只保存方法、错误类型与底层 cause/aggregate code，不保存错误 message、请求正文或凭据 URL。正常取消与失败类型分别留证据，不将 aborted 自动归为网络故障。回归入口为 `tests/telegram/lifecycle.mjs`，不会调用模型或 Telegram。
+
 ## 后台任务完成通知
 
 后台完成通知由 [.pi/extensions/background/notifications/relay-notify.ts](../../../.pi/extensions/background/notifications/relay-notify.ts) 调用本目录的观测实现，复用 `statistics.ts` 的格式化函数。这里的 `beginBackgroundReview()`、`prepareBackgroundDelivery()` 和 `confirmBackgroundDelivery()` 是项目自定义方法，不是 Pi 官方事件。没有增加独立扩展、模型工具或另一套统计配置。
@@ -113,5 +119,7 @@ Pi 事件口径依据 [0.84.1 官方扩展说明](https://github.com/earendil-wo
 - **正文**：先把完整交付正文与尾注拼好，再沿用 Telegram HTML 渲染与分块，分隔线上方只有一个换行。超过单条限制时，各块有持久回执；全部块确认后才算交付，已成功的块不重发，unknown/sending 保留对账。取消了此前 3000 字符和只取第一块的截断。
 
 同一 session JSONL 新增 `background_review_start`、`background_footer_prepared`、`background_delivery_end`。`background_footer_prepared.summary.stages` 保存初次派发回复 API 确认耗时 `dispatchReplyMs`、实际 Herdr 派发/等待耗时 `codingAgentMs`、验收到报告准备耗时 `reviewPreparationMs`；最后事件另存准备到最终 API 确认的 `finalDeliveryMs`。范围可能重叠，不能相加作为总耗时；旧证据或跨多次中断无法核实的阶段保留 null。
+
+迟到结果使用独立的 `runs/<task>/<run>/late-<结果 hash 前16位>/final-report-receipt.json`，不会复用旧失败正文或已冻结的统计。此时 `codingAgentMs` 来自本轮 Codex 原生 `task_complete.duration_ms`，`codingAgentDurationSource` 标注来源；原超时监督等待证据仍保留。页脚的时间格式与截止点保持原来的发送前口径，不在发送后编辑。
 
 回归入口为 [background-delivery.mjs](../../../tests/observability/background-delivery.mjs) 和 [delivery-footer-live.mjs](../../../tests/background/delivery-footer-live.mjs)。实际证据、失败尝试及校正后的独立复核见 [re.md](../../../re.md) 第 6 节。

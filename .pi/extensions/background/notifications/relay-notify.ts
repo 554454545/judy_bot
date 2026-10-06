@@ -134,6 +134,11 @@ export function createRelay(pi: ExtensionAPI, options: {
   function observation() {
     return (globalThis as any)[Symbol.for("bot.observability.telegram-turn")];
   }
+  function deliveryId(notice: Notice) {
+    const task = JSON.parse(fs.readFileSync(path.join(root, "registry.json"), "utf8")).tasks[notice.task_id];
+    const late = task?.runs?.[notice.run_id]?.late_result;
+    return late?.sha256 ? `late-${late.sha256.slice(0, 16)}` : undefined;
+  }
   function observationIdentity(notice: Notice, details = active?.details ?? {}) {
     return {
       root,
@@ -141,6 +146,7 @@ export function createRelay(pi: ExtensionAPI, options: {
       runId: notice.run_id,
       eventId: notice.event_id,
       details,
+      deliveryId: deliveryId(notice),
     };
   }
   function clearControl() {
@@ -150,7 +156,10 @@ export function createRelay(pi: ExtensionAPI, options: {
   async function deliver(notice: Notice, text: string, verified: boolean) {
     const target = owner()?.target;
     if (!target) throw new Error("Background delivery owner unavailable");
-    const directory = path.join(root, "runs", notice.task_id, notice.run_id);
+    const version = deliveryId(notice);
+    // 迟到结果有独立正文和发送身份，不能复用此前“未完成”消息的成功回执。
+    const directory = path.join(root, "runs", notice.task_id, notice.run_id, ...(version ? [version] : []));
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const bodyFile = path.join(directory, "final-report.txt");
     const receiptFile = path.join(directory, "final-report-receipt.json");
     // 重启后沿用已经准备的正文；不会用新回复覆盖发送意图。
@@ -219,7 +228,7 @@ export function createRelay(pi: ExtensionAPI, options: {
     const response = await pi.exec("python3", [
       path.join(scripts, "notify-telegram.py"), body,
       "--root", root,
-      "--event-id", `final-${notice.task_id}-${notice.run_id}`,
+      "--event-id", `final-${notice.task_id}-${notice.run_id}${version ? `-${version}` : ""}`,
       "--target", JSON.stringify(target),
       ...(parseMode ? ["--parse-mode", parseMode] : []),
       ...(prepared.chunks ? ["--chunks-file", receiptFile] : []),
@@ -392,6 +401,8 @@ export function createRelay(pi: ExtensionAPI, options: {
           `本次唯一登记根目录=${root}，CLI=${protocol}；所有命令在子命令前传 --root ${root}。`,
           `结果路径=${notice.result_path ?? "尚无执行结果"}`,
           `如 ready_for_review，按原 acceptance 实际检查并运行测试，写 ${root}/reviews/ 内匹配 task_id/run_id/passed/checks 的 JSON，再 verify。`,
+          "验收先对照 spec 的 originalRequest、clarifications 和当前 instruction/acceptance：整理稿不得遗漏或降低用户原始目标。未经用户明确同意，不能把 1:1、几乎一致等要求改为原创卡通、简化版或仅功能相似。",
+          "若验收标准本身遗漏原目标，或有目标无法实际核实，不能按较低标准通过；verify --reject 并说明未达到或未验证的部分。测试通过、可运行和 worker 自述均不能代替原目标验收。",
           "如检查失败，verify --reject，并据实说明问题，不自动冒充通过或重复派发。",
           "失败或状态不明确时只查有界证据，说明真实问题。不要重发任务，不直接关闭 Herdr。",
           "最后按原始需求交付，而不是只给完成回执。先说明本次对象、范围和结论，再用实际产物、验收证据或相关已有报告说明依据、原因和实际影响；区分已完成、未完成和建议。不得混入其他 Agent/项目的工作或套用别处的数据。",

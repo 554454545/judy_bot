@@ -32,6 +32,7 @@ type BackgroundIdentity = {
   runId: string;
   eventId: string;
   details: object;
+  deliveryId?: string;
 };
 type Turn = {
   id: string;
@@ -101,7 +102,7 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
   let telegramClockNs: bigint | undefined;
 
   function receiptPath(identity: BackgroundIdentity) {
-    return path.join(identity.root, "runs", identity.taskId, identity.runId, "final-report-receipt.json");
+    return path.join(identity.root, "runs", identity.taskId, identity.runId, ...(identity.deliveryId ? [identity.deliveryId] : []), "final-report-receipt.json");
   }
 
   function readReceipt(identity: BackgroundIdentity) {
@@ -267,14 +268,29 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
       protocol: accounting.providerUsageProtocol,
     } : undefined);
     let codingAgentMs: number | null = null;
+    let codingAgentDurationSource = "Herdr supervised prompt wait (same-boot monotonic)";
     try {
       const directory = path.join(identity.root, "runs", identity.taskId, identity.runId);
-      const execution = JSON.parse(readFileSync(path.join(directory, "result.json"), "utf8"));
-      const evidence = JSON.parse(readFileSync(path.join(directory, "herdr-evidence.json"), "utf8"));
+      const task = JSON.parse(readFileSync(path.join(identity.root, "registry.json"), "utf8")).tasks[identity.taskId];
+      const executionPath = task?.runs?.[identity.runId]?.result_path ?? path.join(directory, "result.json");
+      if (path.dirname(executionPath) !== directory) {
+        throw new Error("Execution evidence outside task/run directory");
+      }
+      const execution = JSON.parse(readFileSync(executionPath, "utf8"));
+      const evidencePath = execution.herdr_evidence ?? path.join(directory, "herdr-evidence.json");
+      if (path.dirname(evidencePath) !== directory) {
+        throw new Error("Herdr evidence outside task/run directory");
+      }
+      const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
       if (execution.task_id === identity.taskId && execution.run_id === identity.runId
           && evidence.task_id === identity.taskId && evidence.run_id === identity.runId
           && execution.pid_identity?.boot_id) {
         codingAgentMs = monotonicDuration(evidence.dispatch_started_monotonic_ns, evidence.dispatch_finished_monotonic_ns);
+        if (execution.exit_code_source === "herdr_late_wait_process") {
+          const duration = evidence.native_completion?.payload?.duration_ms;
+          codingAgentMs = Number.isFinite(duration) && duration >= 0 ? duration : null;
+          codingAgentDurationSource = "Codex native task_complete.duration_ms; excludes late collection and review";
+        }
       }
     } catch {
       // 明确失败或旧证据未采集时，不从墙上时间或模型文字推算执行耗时。
@@ -296,10 +312,11 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
       stages: {
         dispatchReplyMs,
         codingAgentMs,
+        codingAgentDurationSource,
         reviewPreparationMs: segments.length === 1 && segments[0].bootId === bootId
           ? monotonicDuration(segments[0].monotonicNs, boundaryNs.toString())
           : null,
-        scope: "dispatch is the final selected originating turn including its reply API confirmation; Coding Agent is actual Herdr dispatch/wait; review includes report preparation; ranges may overlap, do not sum",
+        scope: "dispatch is the final selected originating turn including its reply API confirmation; Coding Agent timing source is codingAgentDurationSource; review includes report preparation; ranges may overlap, do not sum",
       },
     };
   }
@@ -784,7 +801,36 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
     async transport<T>(method: string, body: any, work: () => Promise<T>): Promise<T> {
       const turn = deliveryScope.getStore();
       if (!turn || turn.completed) {
-        return work();
+        try {
+          const result = await work();
+          if (method === "sendChatAction") {
+            observer.runtime("typing_api_confirmed", { method });
+          }
+          return result;
+        } catch (error: any) {
+          const causes = [];
+          const visited = new Set();
+          let current = error;
+          // 只保留类型及错误 code；不保存 message、URL、headers 或请求正文。
+          for (let depth = 0; current && depth < 5 && !visited.has(current); depth++) {
+            visited.add(current);
+            causes.push({
+              name: typeof current.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.name) ? current.name : "Error",
+              code: typeof current.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(current.code) ? current.code : null,
+            });
+            if (Array.isArray(current.errors)) {
+              for (const item of current.errors.slice(0, 8)) {
+                causes.push({
+                  name: typeof item?.name === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.name) ? item.name : "Error",
+                  code: typeof item?.code === "string" && /^[A-Za-z0-9_]{1,80}$/.test(item.code) ? item.code : null,
+                });
+              }
+            }
+            current = current.cause;
+          }
+          observer.runtime("transport_error", { method, causes });
+          throw error;
+        }
       }
       let result: any;
       try {
@@ -809,6 +855,16 @@ export function registerTelegramTurnObservability(pi: ExtensionAPI, write: Write
         turn.deliveries.push({ method, body: { ...body }, result, confirmedAt: beijingIsoTime() });
       }
       return result;
+    },
+    runtime(stage: string, details: Record<string, unknown>) {
+      if (!enabled || !latestContext) {
+        return;
+      }
+      try {
+        write(`telegram_${stage}`, { ...details, monotonicNs: process.hrtime.bigint().toString() }, latestContext);
+      } catch {
+        // 替换中的 ctx 不可再写；观测失败不能改变真实网络结果。
+      }
     },
     decorateFinalText(bridgeTurn: object, text: string | undefined): string | undefined {
       const turn = turns.get(queueKey(bridgeTurn));

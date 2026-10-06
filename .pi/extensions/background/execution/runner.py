@@ -405,6 +405,9 @@ def verify(root, tid, rid, evidence_path, reject=False):
         task = registry["tasks"][tid]
         if task["run_id"] != rid or task["status"] != "ready_for_review":
             raise ValueError("只有当前 ready_for_review run 可以验收")
+        late = task["runs"][rid].get("late_result")
+        if late and summary(task["runs"][rid]["result_path"]) != late:
+            raise ValueError("迟到结果证据变化；停止验收")
         result = read(task["runs"][rid]["result_path"])
         if result_status(result) != "ready_for_review":
             raise ValueError("执行证据变化；停止验收")

@@ -154,6 +154,35 @@ try {
   assert.deepEqual(confirmed.displaySummary, prepared.summary);
   globalThis[key].abandonBackgroundReview();
 
+  // 迟到交付独立准备，不借用已冻结的失败统计；执行阶段来自原生完成证据。
+  const late = { ...active, eventId: "late-event", deliveryId: "late-fixture", details: {} };
+  registry.tasks[active.taskId].runs = {
+    [active.runId]: { result_path: path.join(proofDirectory, "late-result.json") },
+  };
+  fs.writeFileSync(path.join(root, "registry.json"), JSON.stringify(registry));
+  fs.writeFileSync(path.join(proofDirectory, "late-result.json"), JSON.stringify({
+    task_id: active.taskId,
+    run_id: active.runId,
+    exit_code_source: "herdr_late_wait_process",
+    pid_identity: { boot_id: boot },
+    herdr_evidence: path.join(proofDirectory, "late-herdr-evidence.json"),
+  }));
+  fs.writeFileSync(path.join(proofDirectory, "late-herdr-evidence.json"), JSON.stringify({
+    task_id: active.taskId,
+    run_id: active.runId,
+    native_completion: { payload: { duration_ms: 5000 } },
+  }));
+  await globalThis[key].beginBackgroundReview(late, resumed);
+  await emit("message_start", { message: { role: "custom", details: late.details } }, resumed);
+  request("late-review-1", 100, 80, 5, resumed);
+  const latePrepared = await globalThis[key].prepareBackgroundDelivery(late, resumed, "迟到交付正文");
+  assert.equal(latePrepared.reportText, "迟到交付正文");
+  assert.equal(latePrepared.summary.stages.codingAgentMs, 5000);
+  assert(latePrepared.summary.stages.codingAgentDurationSource.includes("task_complete"));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(proofDirectory, "final-report-receipt.json"))).observability.prepared, prepared);
+  assert(fs.existsSync(path.join(proofDirectory, "late-fixture/final-report-receipt.json")));
+  globalThis[key].abandonBackgroundReview();
+
   // 初始问题、确认和跨前台 session 的补充应一起计费，耗时仍从初始问题开始。
   install();
   const confirmation = context("confirmation");
@@ -321,7 +350,7 @@ try {
   const result = {
     at: new Date(wallNow() + 8 * 3600000).toISOString().replace("Z", "+08:00"),
     passed: true,
-    cases: ["same-boot monotonic timing", "24-hour local wall-clock jump", "cross-session origin", "selected clarification/revision turns and original clock", "missing originating turn evidence", "request/tool deduplication", "unrelated chat exclusion", "control object identity", "prepared receipt frozen across restart", "unprepared restart recovery", "Python/Node clock compatibility", "unknown cache and response", "uncalibrated local clock unknown", "reboot without calibration unknown", "reboot with fresh Telegram calibration", "execution/review/delivery stage boundaries", "user preemption"],
+    cases: ["same-boot monotonic timing", "24-hour local wall-clock jump", "cross-session origin", "selected clarification/revision turns and original clock", "missing originating turn evidence", "request/tool deduplication", "unrelated chat exclusion", "control object identity", "prepared receipt frozen across restart", "late delivery statistics separated and native duration preserved", "unprepared restart recovery", "Python/Node clock compatibility", "unknown cache and response", "uncalibrated local clock unknown", "reboot without calibration unknown", "reboot with fresh Telegram calibration", "execution/review/delivery stage boundaries", "user preemption"],
     liveModelCalls: 0,
     liveTelegramMessages: 0,
   };

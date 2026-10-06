@@ -17,6 +17,7 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 - 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。已绑定项目沿用原 sourcePath、worktree 和 session；用户明确指定的位置优先。未绑定项目只给名称或相对目录时，默认在 `/home/judy/workspace/` 下实际检查对应目录，例如 `test99/` 对应 `/home/judy/workspace/test99`；存在就使用，不再问路径，缺失再询问创建与初始化授权，普通文件冲突不覆盖。详见 [项目目标目录](../../../../../plan.md#项目目标目录)。不实现用户任务代码。
 - 用户明确要求在已有空目录开发时，Git 初始化、空基线提交、长期 worktree、按默认配置绑定 Coding Agent 及派发本次任务均是已授权的必要步骤，直接执行，不追加“允许初始化 Git／交给后台开始吗”的确认。先检查包括隐藏文件的目录内容与 Git 状态；已有仓库复用，不能清空目录。仅查看、讨论方案或明确“只准备／先不执行”不属于此授权。
 - 健康测试内容和任务数量由用户指定，等待用户通知后执行；不自行追加测试或根据历史实验授权重新批量派发。
+- 需求传递和验收始终保留用户的原始目标及明确补充。instruction/acceptance 必须覆盖原话，不能把“1:1／几乎一致”自行改成原创卡通、简化版或仅功能近似。实现、素材或验证条件不足时记录真实差距；用户明确同意前不降低目标。可运行、自动测试通过或 worker 自述完成不代表原目标达成；未达到或无法核实的部分不能通过验收。
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
 - inspect 保持 Joye 的完整落盘/CLI 协议；输出给模型时用 Python/jq 提取当前项目绑定、任务 ID/status/run_id、task_hashes 与 handoff_checks，不把全表的 runs/worktree_baseline/outbox 反复输出。验收需求从当前 spec 读取，执行结果使用有界 result。
 - 登记沿用 `register TASK --spec PRIVATE_JSON`。私有 JSON 需要 `projectId`、`instruction`、`scope`、`acceptance`、`artifacts`；ID 由 TASK 指定。允许修改范围与产物使用相对 worktree 路径；scope 的 `**/*` 表示当前 worktree 全部文件（含根目录文件），其他条目按文件/目录处理，不扩展其他通配符。需求不足时先问清楚。

@@ -17,7 +17,7 @@ const pi = {
 const bridge = finalReplyOnlyApi(pi);
 const visible = [];
 const observed = [];
-const ctx = {};
+const ctx = { sessionManager: { getSessionId: () => "typing-fixture" } };
 pi.on("message_update", event => observed.push(event));
 bridge.on("message_update", event => visible.push(event));
 let ended;
@@ -50,6 +50,15 @@ assert.equal(visible[0].message, final);
 visible.length = 0;
 await handlers.get("agent_end")[0]({ messages: [] }, ctx);
 assert.equal(visible.length, 0);
+const controlKey = Symbol.for("bot.background.control-turn");
+globalThis[controlKey] = { sessionId: "typing-fixture" };
+try {
+  await handlers.get("agent_end")[0](event, ctx);
+  assert.deepEqual(ended.messages, [], "后台回合仍执行桥接结束清理，不传递内部模型正文");
+  assert.equal(visible.length, 0);
+} finally {
+  delete globalThis[controlKey];
+}
 console.log("PASS: intermediate output hidden; final text combined; original events retained; empty turn supported.");
 
 // 接入锁定版本桥接的真实 Activity 归一化，确认没有 intermediate 投影。
