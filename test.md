@@ -61,7 +61,8 @@
 
 ### 新项目首次接入与跨项目续用（Issue #24、#10）
 
-- 从获准的新空目录开始，不预先准备 worktree、Agent 配置或原生 session。用日常项目名发需求，确认授权后检查 project-register、worktree-ensure、project-bind、register/prepare/start-run/run 的真实记录。
+- 从已有的新空目录开始，不预先准备 worktree、Agent 配置或原生 session。用日常项目名明确要求制作项目，检查是否直接初始化 Git、建立空基线并继续 project-register、worktree-ensure、project-bind、register/prepare/start-run/run；不应要求额外回复“确认初始化／开始制作”。初始开发原话应直接保存为 originalRequest，不能为了取证制造确认回合。
+- 对照边界：缺失目录仍先问创建；空目录仅查看或讨论方案不初始化、不派发；“先准备、不执行”不派发；包含隐藏业务文件不能当空目录，已有 Git 仓库不重新初始化。执行这些行为用例仍须用户指定测试任务，不自行新建项目或派发开发实验。
 - 两个项目交替进行创建、存档恢复、机制修改三轮任务；每个项目保持唯一原生 UUID 与独立 CODEX_HOME，两个项目的 UUID 必须不同。换项目后再回到原项目，核对项目名、目录、分支、原话、task/run 与实际 worker session，不能只看回答提到的名字。
 - 每轮等独立验收和 TG API 签收完成后再发下一轮。核对新任务没有覆盖旧任务、原生输入一次、真实结果身份、交接 hash、允许范围及项目占用释放。
 - 再新建前台 session，原样重发上一条项目需求；核对新的 user entry/message ID 与独立任务身份，但后台仍复用该项目永久 UUID。重复正文不能借用旧消息的取证，也不能新开后台 session。

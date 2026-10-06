@@ -13,8 +13,9 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 
 本文件是已有 Joye Skill 的项目副本；以下适配用户指定的本地目录、长期会话和文件交接，后面的原工作流保留参考。
 
-- 操作前读取 [项目边界](../../../../../plan.md)。用户已授权接通登记到真实 Coding Agent；明确要求“先准备／先不执行”的任务仍停在 prepare。普通问答和联网查询保持前台。已接入后台自动回传、独立验收、真实 TG 通知、watchdog 和项目常驻恢复；提交、合并、推送与关闭终端仍不自动执行。
+- 操作前读取 [项目边界](../../../../../plan.md)。用户已授权接通登记到真实 Coding Agent；明确要求“先准备／先不执行”的任务仍停在 prepare。普通问答和联网查询保持前台。已接入后台自动回传、独立验收、真实 TG 通知、watchdog 和项目常驻恢复；业务代码提交、合并、推送与关闭终端仍不自动执行，空目录初始化所需的空基线提交按下方授权规则执行。
 - 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。已绑定项目沿用原 sourcePath、worktree 和 session；用户明确指定的位置优先。未绑定项目只给名称或相对目录时，默认在 `/home/judy/workspace/` 下实际检查对应目录，例如 `test99/` 对应 `/home/judy/workspace/test99`；存在就使用，不再问路径，缺失再询问创建与初始化授权，普通文件冲突不覆盖。详见 [项目目标目录](../../../../../plan.md#项目目标目录)。不实现用户任务代码。
+- 用户明确要求在已有空目录开发时，Git 初始化、空基线提交、长期 worktree、按默认配置绑定 Coding Agent 及派发本次任务均是已授权的必要步骤，直接执行，不追加“允许初始化 Git／交给后台开始吗”的确认。先检查包括隐藏文件的目录内容与 Git 状态；已有仓库复用，不能清空目录。仅查看、讨论方案或明确“只准备／先不执行”不属于此授权。
 - 健康测试内容和任务数量由用户指定，等待用户通知后执行；不自行追加测试或根据历史实验授权重新批量派发。
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
 - inspect 保持 Joye 的完整落盘/CLI 协议；输出给模型时用 Python/jq 提取当前项目绑定、任务 ID/status/run_id、task_hashes 与 handoff_checks，不把全表的 runs/worktree_baseline/outbox 反复输出。验收需求从当前 spec 读取，执行结果使用有界 result。
@@ -27,7 +28,7 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 - 收据只表示启动命令被 Herdr 接受，不等于 Codex 已收到或做好。告知用户 task/run ID 和验收标准，后台事件会自动触发独立验收，用户也可以随后查询 `result TASK RUN`；不能在当前回合 sleep 或反复轮询。
 - 查询 `result TASK RUN` 得到有界摘要、状态和证据路径；只按验收需要读取具体文件，不能将完整 worker 对话、终端日志或 diff 塞回主 Pi。ready_for_review 后按 acceptance 实查，写私有检查证据，再 `verify TASK RUN --evidence FILE`；失败加 `--reject`。未核查不能说已验收。
 - 读取源码或测试前，先在当前任务允许的目录列出实际文件名，或核对本 run 业务结果中的实际产物；只读取已确认存在的路径。修改阶段不要求创建新测试文件，可能直接补在原测试文件内，不能根据“新机制”猜出 test_mechanisms.py 等名字。
-- 项目绑定和长期 worktree 是用户指定的本版适配：`project-register PROJECT --spec PRIVATE_JSON`、`worktree-ensure PROJECT --base BASE`，然后 `project-bind PROJECT`（bash timeout 120 秒）。仅在目录、Git 初始化和新 Agent 已获授权后操作。project-bind 使用集中默认配置并交给真实 Herdr Shell，前台不直接调用 runner bind 或 pane run。返回 ready 后重新 prepare；binding/失败时保留证据并报告，不能重复启动。第一次业务执行建立并登记原生 UUID，后续任务固定复用。同项目补充建新任务；换项目查对应绑定，不能沿用最近项目的 session。
+- 项目绑定和长期 worktree 是用户指定的本版适配：`project-register PROJECT --spec PRIVATE_JSON`、`worktree-ensure PROJECT --base BASE`，然后 `project-bind PROJECT`（bash timeout 120 秒）。目录、Git 初始化和新 Agent 的授权按上方空目录规则及项目边界判断，不要求用户另发“确认”才能继续。project-bind 使用集中默认配置并交给真实 Herdr Shell，前台不直接调用 runner bind 或 pane run。返回 ready 后重新 prepare；binding/失败时保留证据并报告，不能重复启动。第一次业务执行建立并登记原生 UUID，后续任务固定复用。同项目补充建新任务；换项目查对应绑定，不能沿用最近项目的 session。
 - sourceEntryIds 的真实 ID 按下方示例从 `PI_SESSION_FILE` 提取。只输出最近十条候选身份及短预览；登记时仍核对当前分支和实际取证，不自动把十条都算作需求，不从预览填写原话。
 - 当前 spec/delta 临时文件放 `.cache/tmp/background/`；沿用文件交接，不把需求正文拼到命令参数。引用本文脚本的命令从项目根目录执行。需要隔离验证时，将 `--root PRIVATE_DIR` 放在子命令之前。
 
