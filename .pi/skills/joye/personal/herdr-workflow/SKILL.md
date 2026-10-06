@@ -25,6 +25,7 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 - `prepare TASK` 生成 spec.json 和 prompt.md 后，再 inspect 核对 `handoff_checks`；`preflight.dispatchEnabled` 为 true 才可进入执行。文件放在 `.pi/agent/background/tasks/TASK/`，不要直接覆盖 registry。尚未绑定的新项目按下方已授权首次接入流程完成绑定；没有授权时先报告，不给已有项目新建替代 Agent。
 - 查询或阅读 Bot 内部源码前先用 `rg --files .pi/extensions/background` 确认实际文件名。项目登记是 projects/registry.py，工作树是 worktrees/manage.py，执行绑定是 execution/herdr.py；不要猜 tasks/projects.py 等不存在的路径。
 - 用户要求实际完成项目任务时，继续 `start-run TASK --run-id RUN`，再 `run TASK RUN`。前者沿用已登记任务并校验原话、修订和交接 hash，后者快速返回 Herdr 收据；模型不要直接写项目代码、直接控制 Herdr 或在当前回合等待 worker。监督程序在项目 Herdr 的真实 Shell 环境运行。
+- `run` 的后台 Coding Agent 等待预算默认 1800 秒（30 分钟）。日常派发省略 `--timeout`，沿用项目默认值；用户明确指定单次预算时才用 `--timeout SECONDS` 覆盖。这不是前台 bash 超时，也不是独立验收时限；超时不代表 Agent 已停止，不能直接清空占用或自动重派。
 - 收据只表示启动命令被 Herdr 接受，不等于 Codex 已收到或做好。告知用户 task/run ID 和验收标准，后台事件会自动触发独立验收，用户也可以随后查询 `result TASK RUN`；不能在当前回合 sleep 或反复轮询。
 - 查询 `result TASK RUN` 得到有界摘要、状态和证据路径；只按验收需要读取具体文件，不能将完整 worker 对话、终端日志或 diff 塞回主 Pi。ready_for_review 后按 acceptance 实查，写私有检查证据，再 `verify TASK RUN --evidence FILE`；失败加 `--reject`。未核查不能说已验收。
 - 读取源码或测试前，先在当前任务允许的目录列出实际文件名，或核对本 run 业务结果中的实际产物；只读取已确认存在的路径。修改阶段不要求创建新测试文件，可能直接补在原测试文件内，不能根据“新机制”猜出 test_mechanisms.py 等名字。
