@@ -1,16 +1,18 @@
-# Codex 项目适配：只读本项目 Pi 认证，隔离 Codex 配置与历史；herdr.py 调用，依据实际会话记录取执行证据。
+# Codex 适配与原生会话浏览：只读项目认证和源索引；关联 herdr.py、resume-codex.sh、项目 Codex home 与浏览索引。
 import argparse
 import base64
 import fcntl
 import json
 import os
 import selectors
+import shutil
 import sqlite3
 import subprocess
 import sys
 import time
 import tomllib
 from pathlib import Path
+from contextlib import closing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from execution.settings import agent_options
@@ -171,9 +173,131 @@ def title(home, session_id):
     database = Path(home) / "state_5.sqlite"
     if not database.exists():
         return None
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
         row = connection.execute("SELECT name FROM threads WHERE id = ?", (session_id,)).fetchone()
     return row[0] if row else None
+
+
+def browser_index(bot_root):
+    # 原生 resume 只读一个 home；汇总列表索引，原 rollout 和写锁仍属于各项目。
+    bot_root = Path(bot_root).resolve()
+    background = bot_root / ".pi/agent/background"
+    browser = background / "codex-session-browser"
+    registry = json.loads((background / "registry.json").read_text())
+    homes = {}
+    for project in registry["projects"].values():
+        if project.get("agentKind") != "codex":
+            continue
+        saved = (project.get("executionSettings") or {}).get("agent", {})
+        if saved.get("home"):
+            home = Path(saved["home"]).resolve()
+            homes[home] = saved.get("binary", "codex")
+    for filename in background.rglob("rollout-*.jsonl"):
+        if filename.is_relative_to(browser):
+            continue
+        for parent in filename.parents:
+            if parent.name in ("sessions", "archived_sessions"):
+                homes.setdefault(parent.parent.resolve(), "codex")
+                break
+    if browser in homes:
+        raise ValueError("会话浏览目录不能同时作为后台项目的 Codex home")
+    for home in homes:
+        if not home.is_relative_to(bot_root):
+            raise ValueError("Codex 会话目录必须在 Bot 内")
+    sources = [
+        home for home in homes
+        if (home / "state_5.sqlite").is_file() and (home / "config.toml").is_file()
+    ]
+    if not sources:
+        raise ValueError("Bot 尚无可读取的原生 Codex 会话索引")
+    primary = sources[0]
+    browser.mkdir(parents=True, exist_ok=True, mode=0o700)
+    config = browser / "config.toml"
+    if not config.exists():
+        shutil.copyfile(primary / "config.toml", config)
+        config.chmod(0o600)
+    primary_config = tomllib.loads(config.read_text())
+    for home in sources:
+        profile = tomllib.loads((home / "config.toml").read_text())
+        if any(profile.get(key) != primary_config.get(key) for key in ("model_provider", "model_providers")):
+            raise ValueError("项目 Provider 配置不同；不能用同一原生浏览入口恢复")
+        if profile.get("sqlite_home"):
+            raise ValueError("该项目使用自定义 sqlite_home，需要先核对其原生索引位置")
+    database = browser / "state_5.sqlite"
+    with closing(sqlite3.connect(database)) as target, target:
+        if not target.execute("SELECT 1 FROM sqlite_master WHERE name='threads'").fetchone():
+            with closing(sqlite3.connect((primary / "state_5.sqlite").as_uri() + "?mode=ro", uri=True)) as source:
+                source.backup(target)
+        for home in sources:
+            with closing(sqlite3.connect((home / "state_5.sqlite").as_uri() + "?mode=ro", uri=True)) as source:
+                source.row_factory = sqlite3.Row
+                for table in ("projects", "thread_sections", "threads"):
+                    if not source.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                        continue
+                    for row in source.execute('SELECT * FROM "' + table + '"'):
+                        values = dict(row)
+                        if table == "threads":
+                            rollout = Path(values["rollout_path"]).resolve()
+                            if not rollout.is_relative_to(bot_root):
+                                raise ValueError("原生会话文件必须留在 Bot 内")
+                            if not rollout.is_file():
+                                continue
+                            with rollout.open() as stream:
+                                record = json.loads(next(stream))
+                            if record.get("type") != "session_meta" or record["payload"]["id"] != values["id"]:
+                                raise ValueError("原生索引与会话文件 UUID 不同")
+                            relative = Path(values["rollout_path"]).relative_to(home)
+                            link = browser / relative
+                            link.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                            if not link.is_symlink() and link.exists():
+                                raise ValueError("浏览目录已有同名会话文件；不覆盖")
+                            if not link.is_symlink():
+                                link.symlink_to(rollout)
+                            elif link.resolve() != rollout:
+                                raise ValueError("浏览索引的会话链接指向不同文件")
+                            original_lock = home / "thread-writer-locks" / (values["id"] + ".lock")
+                            original_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                            lock = browser / "thread-writer-locks" / original_lock.name
+                            lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                            if not lock.is_symlink() and lock.exists():
+                                raise ValueError("浏览目录存在独立写锁；不能绕过原项目写锁")
+                            if not lock.is_symlink():
+                                lock.symlink_to(original_lock)
+                            elif lock.resolve() != original_lock.resolve():
+                                raise ValueError("浏览索引与原项目写锁不同")
+                        fields = ",".join('"' + key + '"' for key in values)
+                        placeholders = ",".join("?" for key in values)
+                        target.execute(
+                            'INSERT OR REPLACE INTO "' + table + '" (' + fields + ') VALUES (' + placeholders + ')',
+                            list(values.values()),
+                        )
+    database.chmod(0o600)
+    return browser, homes[primary]
+
+
+def browse():
+    bot_root = Path(__file__).resolve().parents[4]
+    directory = bot_root / ".pi/agent/background/codex-session-browser"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # 浏览期间不刷新正在使用的索引；此锁不影响 Herdr 的运行。
+    with (directory / "browser.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("原生会话浏览器已经打开；先退出已有窗口") from error
+        home, binary = browser_index(bot_root)
+        environment = dict(os.environ)
+        environment["CODEX_HOME"] = str(home)
+        environment["CODEX_SQLITE_HOME"] = str(home)
+        for variable, folder in (("XDG_CACHE_HOME", "cache"), ("TMPDIR", "tmp")):
+            path = home / folder
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            environment[variable] = str(path)
+        return subprocess.call([
+            binary, "resume", "--all", "--no-daemon",
+            "-c", 'resume_cwd="session"',
+            "-c", "sqlite_home=" + json.dumps(str(home)),
+        ], env=environment)
 
 
 def turn_settings(session_file):
@@ -301,10 +425,18 @@ def set_title(settings, worktree, session_id, name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=["token"])
-    parser.add_argument("--file", required=True)
-    parser.add_argument("--account", required=True)
+    commands = parser.add_subparsers(dest="operation", required=True)
+    token_parser = commands.add_parser("token")
+    token_parser.add_argument("--file", required=True)
+    token_parser.add_argument("--account", required=True)
+    commands.add_parser("browse")
     args = parser.parse_args()
+    if args.operation == "browse":
+        try:
+            sys.exit(browse())
+        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+            print("无法打开 Bot 原生会话列表：" + str(error), file=sys.stderr)
+            sys.exit(1)
     try:
         token, _ = credential(args.file, args.account)
         # 仅 Codex 的 command-backed auth 子进程读取此 stdout；不要在诊断工具中直接运行 token 命令。

@@ -1,11 +1,14 @@
 # 新项目接入回归：验证默认运行参数、失败不留登记及多轮原话身份；关联 execution/settings.py、herdr.py、tasks/task_protocol.py，真实链路另见 project-onboarding-live.mjs。
 import copy
+import fcntl
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import closing
 from unittest.mock import patch
 
 sys.dont_write_bytecode = True
@@ -17,6 +20,86 @@ from tasks import task_protocol
 
 
 class Onboarding(unittest.TestCase):
+    def browser_fixture(self, root):
+        background = root / ".pi/agent/background"
+        projects = {}
+        for name, session_id in (
+            ("alpha", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("beta", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+            ("empty", None),
+        ):
+            home = background / "codex" / name
+            home.mkdir(parents=True)
+            (home / "config.toml").write_text('model_provider = "fixture"\n')
+            with closing(sqlite3.connect(home / "state_5.sqlite")) as database, database:
+                database.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, rollout_path TEXT, created_at INTEGER, updated_at INTEGER, archived INTEGER)")
+                if session_id:
+                    folder = home / ("archived_sessions" if name == "beta" else "sessions/2026/10/06")
+                    folder.mkdir(parents=True)
+                    rollout = folder / ("rollout-" + session_id + ".jsonl")
+                    rollout.write_text(json.dumps({
+                        "type": "session_meta",
+                        "payload": {
+                            "id": session_id,
+                            "cwd": str(root),
+                        },
+                    }) + "\n")
+                    database.execute("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)", (
+                        session_id, "herdr-" + name, str(rollout), 100, 200, int(name == "beta"),
+                    ))
+            projects[name] = {
+                "agentKind": "codex",
+                "executionSettings": {
+                    "agent": {
+                        "home": str(home),
+                        "binary": "fixture-codex",
+                    },
+                },
+            }
+        # beta 模拟不再登记的历史项目；它的原生归档仍然可见。
+        del projects["beta"]
+        (background / "registry.json").write_text(json.dumps({
+            "projects": projects,
+        }))
+        return background
+
+    def test_native_browser_keeps_history_archive_and_real_writer_lock(self):
+        with tempfile.TemporaryDirectory(dir=BOT / ".cache/tmp") as directory:
+            root = Path(directory)
+            background = self.browser_fixture(root)
+            original = background / "codex/alpha"
+            source_database = (original / "state_5.sqlite").read_bytes()
+            home, binary = codex.browser_index(root)
+            self.assertEqual(binary, "fixture-codex")
+            with closing(sqlite3.connect(home / "state_5.sqlite")) as database:
+                rows = database.execute("SELECT name,updated_at,archived FROM threads ORDER BY name").fetchall()
+            self.assertEqual(rows, [("herdr-alpha", 200, 0), ("herdr-beta", 200, 1)])
+            self.assertEqual(source_database, (original / "state_5.sqlite").read_bytes())
+            session_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            with (original / "thread-writer-locks" / (session_id + ".lock")).open("w+") as writer:
+                fcntl.flock(writer.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(ValueError):
+                    codex.check_writer_lock(home, session_id)
+            with closing(sqlite3.connect(original / "state_5.sqlite")) as database, database:
+                database.execute("UPDATE threads SET name='changed-native-name',updated_at=300")
+            codex.browser_index(root)
+            self.assertEqual(codex.title(home, session_id), "changed-native-name")
+
+    def test_native_browser_rejects_mismatched_uuid_and_provider(self):
+        for failure in ("uuid", "provider"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(dir=BOT / ".cache/tmp") as directory:
+                root = Path(directory)
+                background = self.browser_fixture(root)
+                if failure == "uuid":
+                    filename = next((background / "codex/alpha/sessions").rglob("*.jsonl"))
+                    data = json.loads(filename.read_text())
+                    data["payload"]["id"] = "wrong-id"
+                    filename.write_text(json.dumps(data) + "\n")
+                else:
+                    (background / "codex/beta/config.toml").write_text('model_provider = "another-provider"\n')
+                with self.assertRaises(ValueError):
+                    codex.browser_index(root)
+
     def readiness_fixture(self, state):
         project = {
             "agentKind": "codex",
