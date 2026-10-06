@@ -1,0 +1,67 @@
+# 用途：收集 Bot 问题与改进需求；关联 AGENTS.md 和 plan.md 的 GitHub Issues 问题处理流程。
+name: Bot 问题或改进
+description: 记录原始需求、现象、证据、处理方向和验收标准。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先搜索已有 Issue，同一问题追加到原单。
+        标题使用“模块：具体问题或需求”。根因不清楚时写“待调查”，无需先想好解决办法。
+        凭据、完整私人会话与原始模型请求留在本地；这里只填写必要的脱敏证据。
+  - type: dropdown
+    id: category
+    attributes:
+      label: 类型
+      description: 建单后按实际类型设置 bug、enhancement、question 或 documentation 标签。
+      options:
+        - 故障或缺陷
+        - 功能或改进需求
+        - 调查或待决策问题
+        - 文档或工作流程
+    validations:
+      required: true
+  - type: input
+    id: module
+    attributes:
+      label: 所属模块
+      placeholder: 例如 memory、context、telegram、background、observability 或 workflow。
+    validations:
+      required: true
+  - type: textarea
+    id: original-request
+    attributes:
+      label: 原始问题与预期目标
+      description: 摘录必要的用户原话，并说明期望得到什么结果；省略无关私人内容。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 1. 现象、复现与证据
+      description: 写明实际行为、复现步骤、版本或 commit、环境与北京时间（+08:00）。私有日志只给脱敏摘要和本地定位，未验证项写未知。
+      placeholder: |
+        现象或当前行为：
+        复现步骤（功能需求可写尚未实现）：
+        版本、环境与发生时间：
+        脱敏证据、相关文件或本地记录位置：
+    validations:
+      required: true
+  - type: textarea
+    id: analysis
+    attributes:
+      label: 2. 原因分析与处理方向
+      description: 分开记录已确认事实与推测。建单不代表授权修改；调查与方案变化持续追加评论。
+      placeholder: 待调查；已有证据、拟处理范围与尚待决策事项。
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 3. 验收标准
+      description: 写可核对的结果或勾选项。实际修改、PR、验证结果与关闭依据在评论中持续补充。
+      placeholder: |
+        - [ ] 原问题在对应条件下不再出现。
+        - [ ] 相关正常流程和失败边界已核对。
+        - [ ] 实际验证证据、未覆盖条件及关联 PR 已记录。
+    validations:
+      required: true

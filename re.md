@@ -1,5 +1,7 @@
-<!-- 用途：记录后台全链路接入与十组真实 Coding Agent 实验的过程、问题、时间和证据；关联 .pi/extensions/background/、scripts/startup/ 和 test.md。 -->
+<!-- 用途：保留后台接入和真实实验的历史记录；后续调查、修改与验收写入 GitHub Issues，关联 plan.md 的问题处理流程。 -->
 # 后台全链路健康验证记录
+
+> 历史归档：自 2026-10-06 起，后续问题、处理过程与单次验收结果写入 [GitHub Issues](https://github.com/554454545/judy_bot/issues)，不再追加到本文件。既有记录原样保留，所述状态属于记录当时；私有原始证据继续留在项目运行目录。详见 [问题处理流程](plan.md#github-issues-问题处理流程)。
 
 ## 1. 记录规则与本次目标
 
