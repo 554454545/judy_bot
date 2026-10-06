@@ -1,0 +1,13 @@
+{
+  "name": "personal-pi-bot",
+  "private": true,
+  "scripts": {
+    "observe": "node scripts/observability/status.mjs",
+    "test:observability": "node tests/observability/context.mjs",
+    "test:telegram": "node tests/telegram-frontline.mjs",
+    "test:telegram:new": "node tests/telegram/new.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.1"
+  }
+}

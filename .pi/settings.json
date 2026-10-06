@@ -1,0 +1,8 @@
+{
+  "packages": [
+    {
+      "source": "npm:@llblab/pi-telegram@0.27.12",
+      "extensions": []
+    }
+  ]
+}

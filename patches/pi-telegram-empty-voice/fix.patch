@@ -1,0 +1,14 @@
+--- a/lib/outbound.ts
++++ b/lib/outbound.ts
+@@ -884,6 +884,11 @@
+         ? [{ text: plan.voiceText, lang: plan.lang, rate: plan.rate }]
+         : [];
+ 
++    // 没有语音产物时不是合成失败；hidden 模式的普通文字回复直接跳过。
++    if (voiceReplies.length === 0) {
++      return;
++    }
++
+     let anyDelivered = false;
+ 
+     for (const reply of voiceReplies) {

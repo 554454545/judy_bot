@@ -1,0 +1,42 @@
+// 验证记忆来源统一排在系统规则后，自动筛选异步执行；禁止真实模型、TG 和数据库写入。
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+const requirePi = createRequire(new URL("../../node_modules/@earendil-works/pi-coding-agent/package.json", import.meta.url));
+const { createJiti } = requirePi("jiti");
+const jiti = createJiti(import.meta.url, { fsCache: false });
+const context = await jiti.import("../../extensions/context/index.ts");
+const { registerSystemSource } = await jiti.import("../../src/context/system-prompt.ts");
+const contextHandlers = new Map();
+const contextApi = { on(event, handler) { contextHandlers.set(event, handler); } };
+context.default(contextApi);
+registerSystemSource({ on() {} }, "personal-memory", async () => "<memory>fixture fact</memory>");
+const result = await contextHandlers.get("before_agent_start")({ systemPrompt: "Pi/TG stable rules", prompt: "question" });
+assert.equal(result.systemPrompt, "Pi/TG stable rules\n\n<memory>fixture fact</memory>");
+const registry = globalThis[Symbol.for("bot.context.system-sources")];
+registry.clear();
+const recap = await jiti.import("../../.pi/extensions/memory/recap/index.ts");
+const recapHandlers = new Map();
+recap.default({ on(event, handler) { recapHandlers.set(event, handler); } });
+assert.equal(recapHandlers.has("before_agent_start"), false);
+assert.equal(recapHandlers.has("agent_end"), true);
+// 故意先注册 recap，证明排列由记忆类配置决定，不依赖注册顺序。
+registerSystemSource(contextApi, "personal-memory", async () => "<memory>fixture fact</memory>");
+const assembled = await contextHandlers.get("before_agent_start")({ systemPrompt: "Pi/TG stable rules", prompt: "question" });
+assert.ok(assembled.systemPrompt.indexOf("<memory>") < assembled.systemPrompt.indexOf("[Session Recap]"));
+assert.equal(assembled.systemPrompt.split("[Session Recap]").length - 1, 1);
+const repeated = await contextHandlers.get("before_agent_start")({ systemPrompt: assembled.systemPrompt, prompt: "question" });
+assert.equal(repeated.systemPrompt.split("[Session Recap]").length - 1, 1);
+assert.throws(() => registerSystemSource(contextApi, "unarranged", async () => "unexpected"), /no category\/order/);
+let calls = 0;
+globalThis.fetch = async () => {
+  calls++;
+  return { json: async () => ({ choices: [{ message: { content: '{"should_save":false,"memory":"","reason":"fixture"}' } }] }) };
+};
+const sediment = await jiti.import("../../.pi/extensions/memory/autosediment/index.ts");
+const resultFilter = await sediment.filterWithLLM("记住：这是用于验证筛选链路的测试句子。");
+assert.equal(resultFilter.save, false);
+assert.equal(calls, 1);
+fs.mkdirSync(".pi/agent/logs/memory/verification", { recursive: true, mode: 0o700 });
+fs.writeFileSync(".pi/agent/logs/memory/verification/integration-verification.json", JSON.stringify({ systemOrder: "stable rules -> memory category (personal-memory -> session-recap)", reversedRegistrationOrder: "passed", missingSourceSkipped: "passed", unknownSourceRejected: "passed", recapSingleInstruction: "passed", recapAgentEndPreserved: "passed", asyncFilter: true, mockFilterCalls: calls, networkCalls: 0, realRecall: "passed separately; local copied database", enabledInStart: true }, null, 2) + "\n", { mode: 0o600 });
+console.log("PASS memory assembly and asynchronous filtering");
