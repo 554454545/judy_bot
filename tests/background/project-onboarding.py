@@ -27,10 +27,12 @@ class Onboarding(unittest.TestCase):
             ("alpha", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             ("beta", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
             ("empty", None),
+            ("unregistered", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
         ):
             home = background / "codex" / name
             home.mkdir(parents=True)
             (home / "config.toml").write_text('model_provider = "fixture"\n')
+            rollout = None
             with closing(sqlite3.connect(home / "state_5.sqlite")) as database, database:
                 database.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, rollout_path TEXT, created_at INTEGER, updated_at INTEGER, archived INTEGER)")
                 if session_id:
@@ -49,6 +51,8 @@ class Onboarding(unittest.TestCase):
                     ))
             projects[name] = {
                 "agentKind": "codex",
+                "sessionId": session_id,
+                "sessionFile": str(rollout) if rollout else None,
                 "executionSettings": {
                     "agent": {
                         "home": str(home),
@@ -56,14 +60,28 @@ class Onboarding(unittest.TestCase):
                     },
                 },
             }
-        # beta 模拟不再登记的历史项目；它的原生归档仍然可见。
-        del projects["beta"]
+        # 未登记 home 和同一已登记 home 的其他 UUID 都不应进入原生列表。
+        del projects["unregistered"]
+        (background / "codex/unregistered/config.toml").write_text('model_provider = "unused-provider"\n')
+        unrelated_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        unrelated = background / "codex/alpha/sessions/2026/10/06" / ("rollout-" + unrelated_id + ".jsonl")
+        unrelated.write_text(json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "id": unrelated_id,
+                "cwd": str(root),
+            },
+        }) + "\n")
+        with closing(sqlite3.connect(background / "codex/alpha/state_5.sqlite")) as database, database:
+            database.execute("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)", (
+                unrelated_id, "unrelated-alpha", str(unrelated), 100, 200, 0,
+            ))
         (background / "registry.json").write_text(json.dumps({
             "projects": projects,
         }))
         return background
 
-    def test_native_browser_keeps_history_archive_and_real_writer_lock(self):
+    def test_native_browser_keeps_only_registered_sessions_and_real_writer_lock(self):
         with tempfile.TemporaryDirectory(dir=BOT / ".cache/tmp") as directory:
             root = Path(directory)
             background = self.browser_fixture(root)
@@ -85,13 +103,37 @@ class Onboarding(unittest.TestCase):
             codex.browser_index(root)
             self.assertEqual(codex.title(home, session_id), "changed-native-name")
 
+    def test_native_browser_removes_stale_entries_without_deleting_source_history(self):
+        with tempfile.TemporaryDirectory(dir=BOT / ".cache/tmp") as directory:
+            root = Path(directory)
+            background = self.browser_fixture(root)
+            home, _ = codex.browser_index(root)
+            registry = background / "registry.json"
+            data = json.loads(registry.read_text())
+            project = data["projects"].pop("beta")
+            source = Path(project["sessionFile"])
+            source_database = background / "codex/beta/state_5.sqlite"
+            before = source_database.read_bytes()
+            link = home / source.relative_to(background / "codex/beta")
+            lock = home / "thread-writer-locks" / (project["sessionId"] + ".lock")
+            registry.write_text(json.dumps(data))
+            codex.browser_index(root)
+            with closing(sqlite3.connect(home / "state_5.sqlite")) as database:
+                names = database.execute("SELECT name FROM threads").fetchall()
+            self.assertEqual(names, [("herdr-alpha",)])
+            self.assertFalse(link.is_symlink())
+            self.assertFalse(lock.is_symlink())
+            self.assertTrue(source.is_file())
+            self.assertEqual(before, source_database.read_bytes())
+
     def test_native_browser_rejects_mismatched_uuid_and_provider(self):
         for failure in ("uuid", "provider"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory(dir=BOT / ".cache/tmp") as directory:
                 root = Path(directory)
                 background = self.browser_fixture(root)
                 if failure == "uuid":
-                    filename = next((background / "codex/alpha/sessions").rglob("*.jsonl"))
+                    project = json.loads((background / "registry.json").read_text())["projects"]["alpha"]
+                    filename = Path(project["sessionFile"])
                     data = json.loads(filename.read_text())
                     data["payload"]["id"] = "wrong-id"
                     filename.write_text(json.dumps(data) + "\n")

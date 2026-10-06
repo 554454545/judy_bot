@@ -179,26 +179,21 @@ def title(home, session_id):
 
 
 def browser_index(bot_root):
-    # 原生 resume 只读一个 home；汇总列表索引，原 rollout 和写锁仍属于各项目。
+    # 原生 resume 只读一个 home；只汇总 Bot 登记 UUID，原 rollout 和写锁仍属于各项目。
     bot_root = Path(bot_root).resolve()
     background = bot_root / ".pi/agent/background"
     browser = background / "codex-session-browser"
     registry = json.loads((background / "registry.json").read_text())
     homes = {}
+    registered = {}
     for project in registry["projects"].values():
         if project.get("agentKind") != "codex":
             continue
         saved = (project.get("executionSettings") or {}).get("agent", {})
-        if saved.get("home"):
+        if saved.get("home") and project.get("sessionId"):
             home = Path(saved["home"]).resolve()
             homes[home] = saved.get("binary", "codex")
-    for filename in background.rglob("rollout-*.jsonl"):
-        if filename.is_relative_to(browser):
-            continue
-        for parent in filename.parents:
-            if parent.name in ("sessions", "archived_sessions"):
-                homes.setdefault(parent.parent.resolve(), "codex")
-                break
+            registered.setdefault(home, set()).add(project["sessionId"])
     if browser in homes:
         raise ValueError("会话浏览目录不能同时作为后台项目的 Codex home")
     for home in homes:
@@ -224,6 +219,8 @@ def browser_index(bot_root):
         if profile.get("sqlite_home"):
             raise ValueError("该项目使用自定义 sqlite_home，需要先核对其原生索引位置")
     database = browser / "state_5.sqlite"
+    included = set()
+    rollout_links = set()
     with closing(sqlite3.connect(database)) as target, target:
         if not target.execute("SELECT 1 FROM sqlite_master WHERE name='threads'").fetchone():
             with closing(sqlite3.connect((primary / "state_5.sqlite").as_uri() + "?mode=ro", uri=True)) as source:
@@ -234,7 +231,12 @@ def browser_index(bot_root):
                 for table in ("projects", "thread_sections", "threads"):
                     if not source.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
                         continue
-                    for row in source.execute('SELECT * FROM "' + table + '"'):
+                    query = 'SELECT * FROM "' + table + '"'
+                    parameters = []
+                    if table == "threads":
+                        parameters = sorted(registered[home])
+                        query += ' WHERE id IN (' + ','.join('?' for _ in parameters) + ')'
+                    for row in source.execute(query, parameters):
                         values = dict(row)
                         if table == "threads":
                             rollout = Path(values["rollout_path"]).resolve()
@@ -265,12 +267,30 @@ def browser_index(bot_root):
                                 lock.symlink_to(original_lock)
                             elif lock.resolve() != original_lock.resolve():
                                 raise ValueError("浏览索引与原项目写锁不同")
+                            included.add(values["id"])
+                            rollout_links.add(link)
                         fields = ",".join('"' + key + '"' for key in values)
                         placeholders = ",".join("?" for key in values)
                         target.execute(
                             'INSERT OR REPLACE INTO "' + table + '" (' + fields + ') VALUES (' + placeholders + ')',
                             list(values.values()),
                         )
+        # 首次备份和旧浏览索引可能含未登记会话；只移除派生索引，不删除源历史。
+        if included:
+            target.execute(
+                'DELETE FROM threads WHERE id NOT IN (' + ','.join('?' for _ in included) + ')',
+                sorted(included),
+            )
+        else:
+            target.execute("DELETE FROM threads")
+    # 移除过期的浏览链接，防止原生 rollout 扫描把已排除的会话重新加入列表。
+    for folder in ("sessions", "archived_sessions"):
+        for link in (browser / folder).rglob("*.jsonl"):
+            if link.is_symlink() and link not in rollout_links:
+                link.unlink()
+    for link in (browser / "thread-writer-locks").glob("*.lock"):
+        if link.is_symlink() and link.stem not in included:
+            link.unlink()
     database.chmod(0o600)
     return browser, homes[primary]
 
