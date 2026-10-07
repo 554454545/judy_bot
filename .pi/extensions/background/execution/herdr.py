@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from execution import codex, settings as default_settings
 from storage.registry import ident, timestamp, transaction
 from worktrees.check import check
+from projects.registry import assert_active, get
 
 
 class HerdrError(ValueError):
@@ -84,6 +85,10 @@ def bind(root, project, settings):
     if os.environ.get("HERDR_ENV") != "1":
         raise ValueError("首次绑定必须由项目 Herdr 的真实 Shell 执行；前台使用 project-bind")
     project = copy.deepcopy(project)
+    with transaction(root) as registry:
+        previous = registry["projects"].get(project["projectId"])
+        if previous:
+            assert_active(previous)
     startup_timeout_ms = 90_000
     name = "herdr-" + project["projectId"]
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):
@@ -93,6 +98,8 @@ def bind(root, project, settings):
         raise ValueError("；".join(preflight["blockers"]))
     with transaction(root) as registry:
         old = registry["projects"].get(project["projectId"])
+        if old:
+            assert_active(old)
         # 新绑定用集中默认选择；复用时保留已登记的类型与启动参数。
         agent_kind = project.get("agentKind")
         if agent_kind is None:
@@ -217,7 +224,7 @@ def bind(root, project, settings):
 
 def native_session(root, project_id):
     with transaction(root) as registry:
-        project = copy.deepcopy(registry["projects"][project_id])
+        project = copy.deepcopy(get(registry, project_id))
     matches = codex.sessions(project["executionSettings"]["agent"]["home"], project["worktreePath"])
     if len(matches) != 1:
         raise ValueError("无法唯一核对真实 Codex session；不猜测或创建替代 session")

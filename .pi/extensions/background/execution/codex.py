@@ -1,4 +1,4 @@
-# Codex 适配、内部进程识别与原生会话浏览：关联 health.py、herdr.py、resume-codex.sh 和项目 Codex home。
+# Codex 配置、内部进程识别、完整 home 归档与原生会话浏览：关联 health.py、herdr.py、projects/archive.py、resume-codex.sh 和项目 Codex home。
 import argparse
 import base64
 import fcntl
@@ -16,7 +16,83 @@ from contextlib import closing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from execution.settings import agent_options
-from storage.registry import atomic, required
+from storage.registry import atomic, required, timestamp
+from projects.registry import inactive
+
+
+def archive_home(root, project, directory, manifest, checkpoint):
+    # 整个项目 home（原生索引、rollout、历史与配置）原子移入私有档案，不改写原生 UUID/SQLite。
+    from contextlib import ExitStack
+    saved = (project.get("executionSettings") or {}).get("agent", {})
+    if not saved.get("home"):
+        return
+    if project.get("agentKind") != "codex":
+        raise ValueError("该 Coding Agent 的 home 归档适配尚未实现")
+    home = Path(saved["home"])
+    destination = Path(directory) / "coding-agent-home"
+    if destination.is_symlink():
+        raise ValueError("归档 home 被替换为链接；不接管")
+    proof = manifest.get("agentHomeMove")
+    if not home.exists():
+        if destination.exists() and proof:
+            metadata = destination.stat()
+            if (metadata.st_dev, metadata.st_ino) != (proof["device"], proof["inode"]):
+                raise ValueError("归档 home 与原目录内核身份不同")
+            return
+        if project.get("sessionId") or proof:
+            raise ValueError("Coding Agent home 已丢失；不能补造归档成功")
+        return
+    if destination.exists():
+        raise ValueError("原生 home 与归档目标同时存在；不覆盖")
+    sessions_here = sessions(home, project["worktreePath"])
+    if project.get("sessionId") and (len(sessions_here) != 1 or sessions_here[0]["id"] != project["sessionId"]):
+        raise ValueError("Codex 原生 session 与项目登记不同；不移动")
+    locks = list((home / "thread-writer-locks").glob("*.lock"))
+    if project.get("sessionId"):
+        known = home / "thread-writer-locks" / (project["sessionId"] + ".lock")
+        known.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if known not in locks:
+            locks.append(known)
+    with ExitStack() as stack:
+        for path in sorted(locks):
+            if path.is_symlink():
+                raise ValueError("原项目写锁是替代链接；不绕过锁")
+            stream = stack.enter_context(path.open("a+"))
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ValueError("原生会话仍被其他客户端占用；不移动或删除锁") from error
+        metadata = home.stat()
+        observed = {
+            "source": str(home),
+            "destination": str(destination),
+            "device": metadata.st_dev,
+            "inode": metadata.st_ino,
+            "sessionIds": [item["id"] for item in sessions_here],
+        }
+        if proof and proof != observed:
+            raise ValueError("原生 home 在归档中断后已被替换；停止移动")
+        manifest["agentHomeMove"] = observed
+        checkpoint()
+        os.rename(home, destination)
+        manifest["agentHomeMovedAt"] = timestamp()
+        checkpoint()
+
+
+def prune_browser(root, project):
+    # 调用方必须持 browser.lock；这里只移除派生行和链接，原生 home 从不删除。
+    browser = Path(root) / "codex-session-browser"
+    session_id = project.get("sessionId")
+    home = (project.get("executionSettings") or {}).get("agent", {}).get("home")
+    database = browser / "state_5.sqlite"
+    if session_id and database.is_file():
+        with closing(sqlite3.connect(database)) as connection, connection:
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE name='threads'").fetchone():
+                connection.execute("DELETE FROM threads WHERE id = ?", (session_id,))
+    for folder, pattern in (("sessions", "*.jsonl"), ("archived_sessions", "*.jsonl"), ("thread-writer-locks", "*.lock")):
+        for link in (browser / folder).rglob(pattern):
+            if link.is_symlink() and ((home and link.resolve().is_relative_to(Path(home))) or (session_id and link.stem == session_id)):
+                link.unlink()
 
 
 def internal_processes(identity, children):
@@ -219,7 +295,7 @@ def browser_index(bot_root):
     homes = {}
     registered = {}
     for project in registry["projects"].values():
-        if project.get("agentKind") != "codex":
+        if inactive(project) or project.get("agentKind") != "codex":
             continue
         saved = (project.get("executionSettings") or {}).get("agent", {})
         if saved.get("home") and project.get("sessionId"):

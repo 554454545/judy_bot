@@ -10,6 +10,7 @@ from pathlib import Path
 from execution import codex, dispatch, runner
 from notifications.task_protocol import TERMINAL, epoch, handled_failure
 from storage.registry import timestamp, transaction
+from projects.registry import assert_active, inactive
 
 
 def live(identity):
@@ -263,6 +264,8 @@ def reconcile(root, now=None):
         projects = copy.deepcopy(registry["projects"])
     observations = []
     for task in tasks.values():
+        if inactive(projects[task["projectId"]]):
+            continue
         # 显式 retry/update 后 registered 等待新 run；旧结果仅为历史，不能重新覆盖该准备状态。
         if task["status"] in TERMINAL or task["status"] == "registered" or not task.get("run_id"):
             continue
@@ -333,6 +336,8 @@ def reconcile(root, now=None):
         with transaction(root) as registry:
             task = registry["tasks"][old["taskId"]]
             project = registry["projects"][old["projectId"]]
+            if inactive(project):
+                continue
             if runner.digest(task) != runner.digest(old) or runner.digest(project) != runner.digest(projects[old["projectId"]]):
                 continue
             if late:
@@ -408,7 +413,7 @@ def cancel(root, tid, rid):
     rid = runner.ident(rid)
     with transaction(root) as registry:
         task = copy.deepcopy(registry["tasks"][tid])
-        project = copy.deepcopy(registry["projects"][task["projectId"]])
+        project = copy.deepcopy(assert_active(registry["projects"][task["projectId"]]))
         if task.get("run_id") != rid or task["status"] in ("verified", "reported"):
             raise ValueError("只能取消当前未交付 run")
         if task["status"] == "cancelled":
@@ -487,7 +492,7 @@ def cancel(root, tid, rid):
 def retry(root, tid):
     with transaction(root) as registry:
         task = copy.deepcopy(registry["tasks"][runner.ident(tid)])
-        project = copy.deepcopy(registry["projects"][task["projectId"]])
+        project = copy.deepcopy(assert_active(registry["projects"][task["projectId"]]))
     if task["status"] not in ("blocked", "cancelled", "rework"):
         raise ValueError("仅明确失败、已取消或验收返工任务可以重试")
     if task.get("retry_count", 0) >= 2:
@@ -499,6 +504,7 @@ def retry(root, tid):
         raise ValueError("原 Agent 未就绪；不重试")
     with transaction(root) as registry:
         current = registry["tasks"][tid]
+        assert_active(registry["projects"][current["projectId"]])
         if current.get("run_id") != task["run_id"] or current["status"] not in ("blocked", "cancelled", "rework"):
             raise ValueError("重试期间状态变化")
         current["retry_count"] = task.get("retry_count", 0) + 1

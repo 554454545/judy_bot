@@ -1,4 +1,4 @@
-<!-- 用途：积累可复用的前台测试用例与验收方法；新问题及单次结果关联 GitHub Issues，旧执行记录保留为历史。 -->
+<!-- 用途：积累可复用的前台测试用例与验收方法；保留既有经验，原始执行证据留在项目私有运行目录。 -->
 # 前台对话测试问题
 
 ## 1. 使用与记录规则
@@ -8,8 +8,8 @@
 - 使用项目本地 Pi 和当前真实配置。RPC 可以验证模型、上下文、工具和记忆；Telegram 菜单、发送、页脚、排队和时间必须在 TG 链路单独验证，不能用 RPC 结果冒充。
 - 按 [查看模型实际请求上下文](docs/observability/inspect-model-request-context.md) 检查实际 providerPayload 和原始 usage；不能只看回复正确就认定上下文、缓存和记忆正常。
 - 固定用例编号，遇到新问题补充复现问题和预期，不删除旧经验。区分“当前行为已验证”和“希望修复后的预期”；失败不自动授权修改。
-- 本文件只维护可复用的测试问题、复现步骤和验收方法；新缺陷详情、单次执行过程与通过／失败／未验证结果写入 [GitHub Issues](https://github.com/554454545/judy_bot/issues)，按 [问题处理流程](plan.md#github-issues-问题处理流程) 去重与持续记录。完整请求与回复留在每个 session 的私有观测 JSONL，原始执行证据留在对应功能的 `.pi/agent/logs/` 下。
-- Issue 的执行记录注明北京时间、执行入口、sessionId 与证据定位；新用例引用对应 Issue。缺少字段写未知；缓存首次未命中不能单独判失败，append-only 也不保证供应商每次命中。下方既有执行记录和 problem.md 引用保留为历史，不继续在本文件追加单次报告。
+- 本文件维护可复用的测试问题、复现步骤和验收方法；缺陷详情及单次过程与结果按用户要求留存。完整请求与回复留在每个 session 的私有观测 JSONL，原始执行证据留在对应功能的 `.pi/agent/logs/` 下。
+- 执行记录注明北京时间、执行入口、sessionId 与证据定位，区分通过、失败和未验证。缺少字段写未知；缓存首次未命中不能单独判失败，append-only 也不保证供应商每次命中。下方既有执行记录和 problem.md 引用保留为历史。
 - 测试沿用用户已授权的范围，不修改全局 Pi，不打断已有 TG 实例。需要写入、纠正或删除记忆的用例使用明确标注的测试事实，并先核对操作授权；本清单本身不授权删除数据。
 
 ## 2. 基础连续对话：上下文与缓存
@@ -59,6 +59,14 @@
 
 ## 5. 已积累的验证经验
 
+### 项目归档与禁止再次派发（Issue #44）
+
+- 仅在用户指定并授权归档的测试项目上执行。前台新 session 说“归档 `<已登记项目名>`”，核对确切 projectId/sourcePath/worktree/native UUID；普通归档方案问答不能触发实际操作。
+- 正在执行、等待验收/交付、通知已领取或发送结果未知时，应拒绝归档并说明实际阻塞项；不能强杀客户端、删除写锁、手清占用或自动取消任务。
+- 成功后原 workspace 项目目录与工作分支保留；档案中核对隐藏/忽略/未跟踪和未提交成果、暂存区、原生 home/session、任务结果。Bot worktree 的 Git 登记解除，旧通知不再发送，其他项目的绑定/UUID/记录不变。
+- 同项目再次要求开发时明确提示“已归档”，没有新任务、绑定或新 session；换 ID 指向同一实际原目录也被拒绝。`resume-codex.sh` 活动列表不再显示该 UUID，常驻恢复和 watchdog 不重启或再唤醒旧任务。
+- 中断后再次归档应核对并续办同一档案；有新成果、分支/暂存区变动或未知锁时停止，不覆盖任一版本。重复成功归档返回同一位置，清单损坏不能补造成功。离线入口 `tests/background/project-archive.py`；原始证据留在项目私有运行目录。
+
 ### 新项目首次接入与跨项目续用（Issue #24、#10）
 
 - 从已有的新空目录开始，不预先准备 worktree、Agent 配置或原生 session。用日常项目名明确要求制作项目，检查是否直接初始化 Git、建立空基线并继续 project-register、worktree-ensure、project-bind、register/prepare/start-run/run；不应要求额外回复“确认初始化／开始制作”。初始开发原话应直接保存为 originalRequest，不能为了取证制造确认回合。
@@ -67,7 +75,7 @@
 - 每轮等独立验收和 TG API 签收完成后再发下一轮。核对新任务没有覆盖旧任务、原生输入一次、真实结果身份、交接 hash、允许范围及项目占用释放。
 - 再新建前台 session，原样重发上一条项目需求；核对新的 user entry/message ID 与独立任务身份，但后台仍复用该项目永久 UUID。重复正文不能借用旧消息的取证，也不能新开后台 session。
 - 先提需求、再问清边界、再回复“确认”；检查 sourceEntryIds 选择最初问题，确认及澄清单独保留，最终引用不能只指向“确认”。穿插无关问答、分支切换、同文消息与其他 chat/thread 时不能串原话。
-- 无效参数和缺少认证必须明确失败，不能提前留下不完整执行配置。失败重试不新建替代 UUID；有效已绑定项目继续保护原参数。入口：tests/background/project-onboarding.py、project-onboarding-live.mjs；单次结果写对应 GitHub Issue。
+- 无效参数和缺少认证必须明确失败，不能提前留下不完整执行配置。失败重试不新建替代 UUID；有效已绑定项目继续保护原参数。入口：tests/background/project-onboarding.py、project-onboarding-live.mjs；原始证据留在项目私有运行目录。
 - 首次命名不能只看终端输入成功：核对原生 UUID、`thread/name/set` 回读及实际数据库名字一致，不新增用户输入或会话。额度提醒不能接走自动输入而切换模型；每次核对 `herdr-evidence.json.native_model_settings` 与登记参数，恢复仍使用原 UUID。
 - 网络流断开后允许原生有限重试，但不得重派同一业务输入；核对 `native_input_count=1`、真实最终 marker、结果和通知签收，失败仍保留。
 
@@ -442,7 +450,7 @@ test 五组、test1 五组，各创建加两次修改，30 条真实任务完整
 - 用例来源：[Issue #39](https://github.com/554454545/judy_bot/issues/39)。第一轮失败后 Codex 内部 host 常驻，不应永久占用项目；同项目后续任务继续复用原 worktree 和原生 UUID。
 - 本地回归入口为 `PYTHONDONTWRITEBYTECODE=1 python3 tests/background/failure-cleanup.py`。核对实际 executable、父进程、PID 出生身份，避免仅凭名字放行；host 的真实业务后代仍须阻止释放，取消不能误杀 host。
 - 范围为 `**/*` 时，根目录 README.md、game.js 和嵌套 outputs 文件均应获准；指定文件/目录仍拒绝相邻路径、绝对路径与上级跳转。旧失败结果不能因校验修正被补写成成功。
-- 实际续派测试的内容及数量等待用户指定；新建前台 session，后台仍复用同项目原生 session。单次结果记入 Issue，不能把本地进程夹具或只读证据复核称为完整 TG→Codex 新任务通过。
+- 实际续派测试的内容及数量等待用户指定；新建前台 session，后台仍复用同项目原生 session。不能把本地进程夹具或只读证据复核称为完整 TG→Codex 新任务通过。
 
 ### 迟到结果、旧失败通知与输入状态
 
@@ -452,4 +460,4 @@ test 五组、test1 五组，各创建加两次修改，30 条真实任务完整
 - 迟到交付不能复用旧失败正文、message_id 或统计快照；仍引用原始 TG 提问。开发耗时取核实的原生 duration_ms 并说明来源，不能拿超时预算作完整耗时。
 - 后台无 activeTurn 的模型回合结束也要停止 typing；切 session 时旧 getMe 与能力转换的异步回调不能访问旧 ctx，新监控继续工作。网络日志只保留类型和 code，不含凭据 URL、headers 或原话。
 - 需求交接与验收保留用户原始目标，不能把“1:1／几乎一致”改成简化目标；可运行和自动测试通过不能代替原目标验收，缺失或未核实的部分不能通过。
-- 本地回归入口：`tests/background/late-results.py`、`tests/background/late-delivery.mjs`、`tests/telegram/lifecycle.mjs`。这些不调用模型或 TG，不算完整真实链路实验；实际任务内容和数量仍等待用户指定，证据记录到 Issue #45、#46、#38。
+- 本地回归入口：`tests/background/late-results.py`、`tests/background/late-delivery.mjs`、`tests/telegram/lifecycle.mjs`。这些不调用模型或 TG，不算完整真实链路实验；实际任务内容和数量仍等待用户指定，原始证据留在项目私有运行目录；既有调查记录见 Issue #45、#46、#38。

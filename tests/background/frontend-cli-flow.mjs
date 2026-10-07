@@ -55,7 +55,7 @@ const treeContents = directory => {
   return entries;
 };
 const git = (cwd, ...args) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "-C", cwd, ...args], { encoding: "utf8" }).trim();
-const protectedPaths = ["AGENTS.md", "plan.md", "start.sh", ".pi/agent/auth.json", ".pi/agent/models.json",
+const protectedPaths = ["AGENTS.md", "start.sh", ".pi/agent/auth.json", ".pi/agent/models.json",
   ".pi/agent/settings.json", ".pi/agent/background/registry.json", ".pi/extensions/background/index.ts",
   ".pi/extensions/background/tasks/task_protocol.py", ".pi/extensions/background/tasks/source.ts"];
 const protectedHashes = Object.fromEntries(protectedPaths.map(file => [file, digest(path.join(bot, file))]));
@@ -121,9 +121,8 @@ try {
       fs.cpSync(config, path.join(agentDir, "config", name), { recursive: true });
     }
   }
-  fs.writeFileSync(path.join(frontend, "AGENTS.md"), "# 隔离前台验证\n操作前完整读取 plan.md，按已有 Joye herdr-workflow Skill 只完成派发前准备。\n");
-  fs.writeFileSync(path.join(frontend, "plan.md"), [
-    "# 本次测试边界", "所有写入限于当前测试 frontend 和它的登记项目 worktree；不修改原 Bot，不修改全局目录。",
+  fs.writeFileSync(path.join(frontend, "AGENTS.md"), [
+    "# 隔离前台验证", "按已有 Joye herdr-workflow Skill 只完成派发前准备。", "所有写入限于当前测试 frontend 和它的登记项目 worktree；不修改原 Bot，不修改全局目录。",
     "当前阶段只登记项目任务、更新需求、准备交接稿；不启动 Herdr/Coding Agent，不实际写用户任务代码，不提交、合并或部署。",
     "使用原版 Joye Skill 的项目适配和已有 bash；所有管理操作以最新登记表为依据。普通问答和查询不能登记新任务。",
     "末轮联网查询可读取已有 web-search Skill；只读搜索，不保存用户记忆。",

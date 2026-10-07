@@ -1,8 +1,7 @@
 ---
 name: herdr-workflow
-description: "The user's preferred herdr workflow for project coding tasks: register requirements, prepare a handoff, dispatch through the project Herdr, inspect results and independently verify. Ordinary questions do not need it."
+description: "The user's preferred herdr workflow for project coding tasks and project archiving: register requirements, prepare a handoff, dispatch through the project Herdr, inspect results, independently verify, or archive a registered project. Ordinary questions do not need it."
 ---
-
 ## 项目路径约定
 
 - `.pi/`、`data/`、`tools/`、`references/`、`outputs/`、`.cache/`、`docs/` 和 `node_modules/` 开头的路径，相对于项目根目录；示例命令从项目根目录执行，除非明确说明先切换目录。
@@ -13,9 +12,12 @@ description: "The user's preferred herdr workflow for project coding tasks: regi
 
 本文件是已有 Joye Skill 的项目副本；以下适配用户指定的本地目录、长期会话和文件交接，后面的原工作流保留参考。
 
-- 操作前读取 [项目边界](../../../../../plan.md)。用户已授权接通登记到真实 Coding Agent；明确要求“先准备／先不执行”的任务仍停在 prepare。普通问答和联网查询保持前台。已接入后台自动回传、独立验收、真实 TG 通知、watchdog 和项目常驻恢复；业务代码提交、合并、推送与关闭终端仍不自动执行，空目录初始化所需的空基线提交按下方授权规则执行。
-- 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。已绑定项目沿用原 sourcePath、worktree 和 session；用户明确指定的位置优先。未绑定项目只给名称或相对目录时，默认在 `/home/judy/workspace/` 下实际检查对应目录，例如 `test99/` 对应 `/home/judy/workspace/test99`；存在就使用，不再问路径，缺失再询问创建与初始化授权，普通文件冲突不覆盖。详见 [项目目标目录](../../../../../plan.md#项目目标目录)。不实现用户任务代码。
+- 操作前读取 [项目边界](../../../../../AGENTS.md)。用户已授权接通登记到真实 Coding Agent；明确要求“先准备／先不执行”的任务仍停在 prepare。普通问答和联网查询保持前台。已接入后台自动回传、独立验收、真实 TG 通知、watchdog 和项目常驻恢复；业务代码提交、合并、推送与关闭终端仍不自动执行，空目录初始化所需的空基线提交按下方授权规则执行。
+- 不新建模型工具，通过已有 `bash` 调用 `.pi/extensions/background/tasks/task_protocol.py`。先执行 `inspect`，按 `registry.projects` 中的项目名称查目录；用户日常说“test 项目”即可，不要求用户输入完整路径。已绑定项目沿用原 sourcePath、worktree 和 session；用户明确指定的位置优先。
+- 未绑定项目只给名称或相对目录时，默认在 `/home/judy/workspace/` 下实际检查对应目录，例如 `test99/` 对应 `/home/judy/workspace/test99`；存在就使用，不再问路径，缺失再询问创建与初始化授权，普通文件冲突不覆盖。详见 [项目目标目录](../../../../../AGENTS.md#项目定位与后台任务)。不实现用户任务代码。
 - 用户明确要求在已有空目录开发时，Git 初始化、空基线提交、长期 worktree、按默认配置绑定 Coding Agent 及派发本次任务均是已授权的必要步骤，直接执行，不追加“允许初始化 Git／交给后台开始吗”的确认。先检查包括隐藏文件的目录内容与 Git 状态；已有仓库复用，不能清空目录。仅查看、讨论方案或明确“只准备／先不执行”不属于此授权。
+- 同时检查 `registry.archivedProjects`，按项目 ID 或实际 sourcePath 精确匹配。项目已归档时明确回复“该项目已经归档，不能派发任务”，给出归档位置；不自动恢复、重新登记、换 ID 绑定同一目录或创建新 session。归档未完成也不得派发、绑定或重试开发任务。
+- 用户明确要求“归档某项目”时，先 `project-archive PROJECT --preview` 核对登记身份与影响，再 `project-archive PROJECT` 执行。已有明确项目和归档指令时不重复索要授权；目标缺失或有歧义时先确定项目。仅讨论归档方案不执行。该命令保全 worktree 成果与原生 home、解除活动关联并输出档案位置，原 workspace 项目目录保留。活动任务、验收/交付、未知通知、非空闲客户端及写锁会拒绝操作；不能通过取消、手改登记或删除目录绕过。归档中断后只可再次调用同一归档命令核对并续办；未返回 archived 就不能说已完成。完整边界见 [后台归档说明](../../../../extensions/background/README.md#项目归档)。
 - 健康测试内容和任务数量由用户指定，等待用户通知后执行；不自行追加测试或根据历史实验授权重新批量派发。
 - 需求传递和验收始终保留用户的原始目标及明确补充。instruction/acceptance 必须覆盖原话，不能把“1:1／几乎一致”自行改成原创卡通、简化版或仅功能近似。实现、素材或验证条件不足时记录真实差距；用户明确同意前不降低目标。可运行、自动测试通过或 worker 自述完成不代表原目标达成；未达到或无法核实的部分不能通过验收。
 - 每次 bash 单独调用一个 task_protocol.py 操作，检查返回后再调用下一步；prepare/start-run/run 不是 register 的参数，不能直接拼到同一命令末尾。
@@ -90,6 +92,7 @@ for key, value in registry["tasks"].items():
 print(json.dumps({
     "registry": {
         "projects": projects,
+        "archivedProjects": registry.get("archivedProjects", {}),
         "tasks": tasks,
     },
     "task_hashes": payload.get("task_hashes"),
@@ -97,7 +100,6 @@ print(json.dumps({
 }, ensure_ascii=False))
 PY
 ```
-
 
 # herdr Workflow（Joye 经验与本项目适配）
 
@@ -203,6 +205,7 @@ nohup bash .cache/tmp/herdr/relay.sh > .cache/tmp/herdr/relay.log 2>&1 &
 ```
 
 关键点：
+
 - `agent prompt --wait` / `agent wait` 本身就等到 settled 状态（idle/done/blocked）才返回，**无需轮询**
 - 等特定输出用 `herdr pane wait-output <pane> --match "DONE_XXX" --timeout <ms>`
 - `--wait` 被 bash 工具 timeout 截断 ≠ 任务没在跑 —— 把带 `--wait` 的命令放后台（nohup）跑，完成读日志即可
