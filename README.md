@@ -2,7 +2,7 @@
 
 本项目在目录内安装 Pi 0.84.1 和 Telegram 桥接 `@llblab/pi-telegram@0.27.12`，版本按 Joye 参考材料固定。
 
-后续依赖、Pi 扩展包、Skills、工具配置与运行数据均优先放在本目录；简短指引见 [AGENTS.md](AGENTS.md)，详细边界见 [plan.md](plan.md)。项目 `.npmrc` 将 npm 缓存放在 `.cache/npm/`，不修改全局 npm 配置。
+后续依赖、Pi 扩展包、Skills、工具配置与运行数据均优先放在本目录；项目约定统一见 [AGENTS.md](AGENTS.md)。项目 `.npmrc` 将 npm 缓存放在 `.cache/npm/`，不修改全局 npm 配置。
 
 代码仓库：[554454545/judy_bot](https://github.com/554454545/judy_bot)，私有。仓库保存源码、Skills、补丁、测试、文档、依赖清单与无密钥的 Coding Agent 默认设置。真实认证、会话、观测日志、记忆库、任务运行记录、生成输出、已安装依赖、Herdr 二进制及业务 worktree 保留在本地，不上传。
 

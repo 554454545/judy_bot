@@ -363,7 +363,6 @@ try {
         `本次项目为 test3、test4，来源目录分别是 /home/judy/workspace/test3 和 /home/judy/workspace/test4。用户明确授权创建 Git 基线、长期 worktree、新 Agent，以及完整业务链路。两者初始均为空，不能借用其他项目的 worktree/session。`,
         `本次登记根目录是 ${root}。每条 task_protocol.py 命令在子命令前传 --root ${path.relative(bot, root)}；不读写默认正式登记表。第一次分别完成 project-register、worktree-ensure --base main、project-bind，再 prepare/start-run/run。不要直接操作 Herdr pane 或调用 runner bind。`,
         `spec/review 等私有文件写 ${root}/handoffs 和 ${root}/reviews。前台不得代写业务程序；业务只在本项目 worktree 的 ${directory}/ 内。每轮创建新任务，保持该项目永久 session，不覆盖旧任务。`,
-        "这是已有 Issue #24 的健康实验；调查、失败和验收记录沿用该 Issue，不为实验中的业务请求另建 Issue。",
       clarificationOnly
       ? "本场景只测试澄清与交接准备。用户确认之前不登记；确认后仅 register → prepare → 检查 hash/preflight，禁止 start-run/run、禁止给 Codex 派发。"
       : "必须完整执行 register → prepare → 检查 hash/preflight → start-run → run --timeout 1800；run 返回收据后立即简短回复，不 sleep、不轮询 worker、不等待或主动查询完成。",

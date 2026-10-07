@@ -1,4 +1,4 @@
-# 项目后台常驻服务：监督本地 Herdr、恢复登记的原生会话并独立运行 Joye watchdog；由 scripts/startup/telegram.mjs 启动，不操作其他实例。
+# 项目后台常驻服务：监督本地 Herdr、恢复活动登记的原生会话并独立运行 Joye watchdog；由 scripts/startup/telegram.mjs 启动，遵循 projects 的归档围栏，不操作其他实例。
 import argparse
 import copy
 import fcntl
@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from execution import codex, dispatch, herdr, runner
+from projects.registry import get, inactive, operation
 from storage.registry import DEFAULT_ROOT, atomic, timestamp, transaction
 
 BOT = Path(__file__).resolve().parents[4]
@@ -84,10 +85,15 @@ def runtime_pane(root):
 
 
 def recover_project(root, project_id):
+    with operation(root, project_id):
+        return _recover_project(root, project_id)
+
+
+def _recover_project(root, project_id):
     if os.environ.get("HERDR_ENV") != "1":
         raise ValueError("恢复必须由真实 Herdr pane 执行")
     with transaction(root) as registry:
-        project = copy.deepcopy(registry["projects"][project_id])
+        project = copy.deepcopy(get(registry, project_id))
     settings = project["executionSettings"]
     binding = project["herdr"]
     agents = herdr.require(settings, "agent", "list")["result"]["agents"]
@@ -111,7 +117,7 @@ def recover_project(root, project_id):
         *codex.launch_arguments(settings["agent"], native[0]["id"]), timeout=100)
     current = herdr.agent(settings, binding)["result"]["agent"]
     with transaction(root) as registry:
-        bound = registry["projects"][project_id]
+        bound = get(registry, project_id)
         if bound["sessionId"] != native[0]["id"] or bound["herdr"] != binding:
             raise ValueError("恢复期间项目绑定变化")
         bound["herdr"]["lastRecovery"] = {
@@ -129,7 +135,7 @@ def recover(root):
     with transaction(root) as registry:
         projects = copy.deepcopy(registry["projects"])
     for project_id, project in projects.items():
-        if not project.get("sessionId") or not project.get("executionSettings"):
+        if inactive(project) or not project.get("sessionId") or not project.get("executionSettings"):
             continue
         try:
             result = recover_project(root, project_id)
@@ -170,7 +176,7 @@ def serve(root):
             agents = dispatch.control(SETTINGS, "agent", "list")["result"]["agents"]
             with transaction(root) as registry:
                 projects = copy.deepcopy(registry["projects"])
-            missing = [project for project in projects.values() if project.get("sessionId") and project.get("herdr") and not any(agent.get("name") == project["herdr"]["agent_name"] for agent in agents)]
+            missing = [project for project in projects.values() if not inactive(project) and project.get("sessionId") and project.get("herdr") and not any(agent.get("name") == project["herdr"]["agent_name"] for agent in agents)]
             if missing and time.monotonic() - recovery_at > 120:
                 file = root / "logs/recovery.log"
                 command = shlex.join(["nohup", sys.executable, str(Path(__file__).resolve()), "--root", str(root), "--recover"])

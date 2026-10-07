@@ -19,7 +19,7 @@ node "$bot_root/extensions/observability/telegram-turn/patch.mjs" --check >&2
 # 中文粗体修复也须在启动前核对，防止重装桥接包后恢复错误渲染。
 node "$bot_root/patches/telegram-rendering/patch.mjs" --check >&2
 
-# --no-skills 只关闭自动扫描；下面逐个 --skill 显式启用当前流程实际需要的 Joye 本地副本。
+# --no-skills 关闭自动扫描；下面仅加载白名单。herdr-workflow 使用我们编写的项目适配版，herdr-workflow-our-copy 不加载。
 exec "$bot_root/node_modules/.bin/pi" --approve \
   -e "$bot_root/extensions/telegram/index.ts" \
   -e "$bot_root/extensions/context/index.ts" \

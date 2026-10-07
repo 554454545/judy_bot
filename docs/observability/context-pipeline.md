@@ -9,7 +9,7 @@
 | 内容 | 当前接入方式 | 当前状态 |
 | --- | --- | --- |
 | Pi 默认 System Prompt 与工具说明 | Pi 按当前工具和构建选项组装 | 启用 |
-| 项目规则 | `--append-system-prompt` 读取根目录 AGENTS.md | 启用；读取发生在资源加载时；只追加简短指引，详细约定位于 plan.md，按指引读取 |
+| 项目规则 | `--append-system-prompt` 读取根目录 AGENTS.md | 启用；读取发生在资源加载时；统一加载 AGENTS.md 中的项目约定 |
 | Telegram 上下文与工具 | `-e extensions/telegram/index.ts` | 显式加载；连接使用 `/telegram-connect personal` |
 | 上下文观测 | `-e extensions/observability/index.ts` | 显式加载，排在其他扩展后面 |
 | `extensions/` 中其他参考代码 | 未指定其 `-e` 路径 | 不自动加载 |
@@ -120,7 +120,7 @@ npm run observe
 文件名采用会话创建时间（北京时间 UTC+8，文件名以 +08-00 标明时区）加下划线及 session ID；重启沿用原会话时间，不另建文件。
 
 
-AGENTS.md 已精简为边界摘要和 plan.md 加载指引；原详细约定完整移动到根目录 plan.md。运行中的 Pi 不会因文件修改自动更新已加载的 System Prompt；下次 /pi_new 创建运行实例或重新启动时读取新指引。读取 plan.md 的结果会作为工具结果进入上下文，不会自动拼到 System Prompt 中。
+项目必要约定已统一到根目录 AGENTS.md，由启动入口追加到 System Prompt。运行中的 Pi 不会因文件修改自动更新已加载的 System Prompt；下次 /pi_new 创建运行实例或重新启动时读取新指引。
 
 查询实际请求与回复时，按 [上下文观测查询规则](inspect-model-request-context.md) 定位记录与字段。
 

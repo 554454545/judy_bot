@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import argparse, hashlib, json, os, sys, time, urllib.request, urllib.parse, urllib.error, uuid
 from pathlib import Path
-from task_protocol import ROOT, transaction, digest, delivery_hash
+from task_protocol import ROOT, transaction, digest, delivery_hash, notification_receipts
 
 def cooldown_guard(config, profile, token, chat):
     """Respect live bridge cooldowns and serialize standalone notification attempts."""
@@ -108,7 +108,7 @@ def durable_send(root,eid,text,config,profile,opener=urllib.request.urlopen,targ
             raise ValueError('invalid prepared message chunks')
     key=digest([eid,profile,target])
     h=delivery_hash(text)
-    with transaction(root,'telegram-receipts.json') as receipts:
+    with notification_receipts(root,eid) as receipts:
         previous=receipts.get(key)
         if previous:
             if previous['hash']!=h:

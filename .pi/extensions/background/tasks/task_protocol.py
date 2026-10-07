@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from projects.registry import get, register as register_project
+from projects.registry import get, inactive, register as register_project
 from storage.registry import DEFAULT_ROOT, atomic, ident, required, timestamp, transaction
 from worktrees.check import check
 from worktrees.manage import ensure as ensure_worktree
@@ -133,6 +133,7 @@ def update_task(root, request):
         task = registry["tasks"].get(task_id)
         if not task:
             raise ValueError("任务尚未登记")
+        get(registry, task["projectId"])
         if digest(task) != request.get("expectedHash"):
             raise ValueError("任务已变化，请重新 inspect 后使用最新 taskHashes 更新")
         if task["status"] != "registered":
@@ -182,6 +183,7 @@ def prepare(root, task_id):
         task = registry["tasks"].get(ident(task_id))
         if not task:
             raise ValueError("任务尚未登记")
+        get(registry, task["projectId"])
         if task["status"] != "registered":
             raise ValueError("任务已进入其他阶段，不能重新准备")
         original = original_request(task.get("originalRequest"))
@@ -267,6 +269,25 @@ def prepare(root, task_id):
 
 def inspect(root):
     with transaction(root) as registry:
+        registry = copy.deepcopy(registry)
+        archived = {key: value for key, value in registry["projects"].items() if inactive(value)}
+        registry["projects"] = {key: value for key, value in registry["projects"].items() if not inactive(value)}
+        registry["archivedProjects"] = {
+            key: {
+                "projectId": key,
+                "sourcePath": value["sourcePath"],
+                "archive": value["archive"],
+            }
+            for key, value in archived.items()
+        }
+        archived_tasks = {key for key, value in registry["tasks"].items() if value["projectId"] in archived}
+        registry["tasks"] = {
+            key: value for key, value in registry["tasks"].items() if value["projectId"] not in archived
+        }
+        registry["outbox"] = {
+            key: value for key, value in registry.get("outbox", {}).items()
+            if value.get("task_id") not in archived_tasks
+        }
         checks = {}
         for task_id, task in registry["tasks"].items():
             if not task.get("files"):
@@ -384,6 +405,9 @@ def main():
     command = sub.add_parser("project-register")
     command.add_argument("project_id")
     command.add_argument("--spec", required=True)
+    command = sub.add_parser("project-archive")
+    command.add_argument("project_id")
+    command.add_argument("--preview", action="store_true")
     command = sub.add_parser("worktree-ensure")
     command.add_argument("project_id")
     command.add_argument("--base", required=True)
@@ -454,6 +478,9 @@ def main():
     args.root = args.root.resolve()
     if args.cmd == "project-register":
         result = register_project(args.root, {**read_spec(args.spec), "projectId": args.project_id})
+    elif args.cmd == "project-archive":
+        from projects.archive import archive, preview
+        result = preview(args.root, args.project_id) if args.preview else archive(args.root, args.project_id)
     elif args.cmd == "register":
         request = read_spec(args.spec)
         sources = registration_sources(request)
@@ -485,6 +512,7 @@ def main():
         from execution import runner
         with transaction(args.root) as registry:
             task = copy.deepcopy(registry["tasks"][ident(args.task_id)])
+            get(registry, task["projectId"])
         if not task.get("files"):
             raise ValueError("交接稿尚未 prepare；先准备并核对 hash")
         tid, rid = runner.start_run(args.root, task["files"]["spec"], task["files"]["prompt"], args.run_id)

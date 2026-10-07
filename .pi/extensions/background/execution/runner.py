@@ -169,6 +169,9 @@ def start_run(root, spec_path, prompt_path, run_id):
     prompt_bytes = Path(prompt_path).read_bytes()
     spec = json.loads(spec_bytes)
     project = spec["project"]
+    from projects.registry import get
+    with transaction(root) as registry:
+        get(registry, project["projectId"])
     task = spec["task"]
     tid = ident(task["taskId"])
     rid = ident(run_id)
@@ -188,7 +191,7 @@ def start_run(root, spec_path, prompt_path, run_id):
     marker = "DONE_" + digest([tid, rid])[:24].upper()
     run_directory = Path(root) / "runs" / tid / rid
     with transaction(root) as registry:
-        bound = registry["projects"].get(project["projectId"])
+        bound = get(registry, project["projectId"])
         if not bound or not (bound.get("herdr") or {}).get("agent_name"):
             raise ValueError("项目尚未真实绑定 Herdr Agent")
         for field in ("sourcePath", "worktreePath", "branch", "agentKind"):
@@ -283,8 +286,10 @@ def start_run(root, spec_path, prompt_path, run_id):
 
 
 def commit_result(root, tid, rid, result):
+    from projects.registry import assert_active
     with transaction(root) as registry:
         task = registry["tasks"][tid]
+        assert_active(registry["projects"].get(task["projectId"], {}))
         run = task["runs"][rid]
         if result["task_id"] != tid or result["run_id"] != rid or result["started_at"] != run["started_at"]:
             raise ValueError("执行结果身份不匹配")
@@ -299,9 +304,11 @@ def commit_result(root, tid, rid, result):
 
 
 def run_command(root, tid, rid, timeout):
+    from projects.registry import assert_active
     command = [sys.executable, str(Path(__file__).with_name("herdr.py")), "--root", str(root), "--timeout", str(timeout)]
     with transaction(root) as registry:
         task = registry["tasks"][tid]
+        assert_active(registry["projects"].get(task["projectId"], {}))
         run = task["runs"][rid]
         if task["run_id"] != rid or task["status"] != "starting" or run.get("runner_started"):
             raise ValueError("run 已开始；不重复启动")
@@ -397,12 +404,14 @@ def run_command(root, tid, rid, timeout):
 
 
 def verify(root, tid, rid, evidence_path, reject=False):
+    from projects.registry import assert_active
     proof = summary(evidence_path)
     evidence = read(evidence_path)
     if proof.get("size", 0) <= 0 or not isinstance(evidence, dict) or evidence.get("task_id") != tid or evidence.get("run_id") != rid:
         raise ValueError("必须提供匹配本次 task/run 的真实验收证据")
     with transaction(root) as registry:
         task = registry["tasks"][tid]
+        assert_active(registry["projects"].get(task["projectId"], {}))
         if task["run_id"] != rid or task["status"] != "ready_for_review":
             raise ValueError("只有当前 ready_for_review run 可以验收")
         late = task["runs"][rid].get("late_result")

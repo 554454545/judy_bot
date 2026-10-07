@@ -12,6 +12,7 @@ from datetime import datetime
 from execution.runner import atomic_json as atomic, digest, read, summary
 from execution.runner import emit
 from storage.registry import DEFAULT_ROOT, transaction as registry_transaction
+from projects.registry import assert_active, inactive
 
 ROOT = DEFAULT_ROOT
 TERMINAL = ('reported', 'closed_legacy', 'cancelled')
@@ -23,7 +24,11 @@ def epoch(value):
 
 
 def task(registry, task_id):
-    return registry['tasks'][task_id]
+    value = registry['tasks'][task_id]
+    project = registry.get('projects', {}).get(value.get('projectId'))
+    if project:
+        assert_active(project)
+    return value
 
 
 @contextlib.contextmanager
@@ -60,6 +65,35 @@ def registry_inbox(root, write_registry=False):
 def binding(t):
     return {k: copy.deepcopy(t.get(k)) for k in ('route', 'type', 'agent_name', 'workspace_id', 'pane_id')}
 
+
+def notification_task(registry, eid):
+    # 当前接力已有的 final-TASK-RUN[-late-HASH] 以及分块 ID；不按项目名子串匹配。
+    base = eid.split(':part-', 1)[0]
+    event = registry.get('outbox', {}).get(base)
+    if event:
+        return registry.get('tasks', {}).get(event.get('task_id'))
+    matches = []
+    for value in registry.get('tasks', {}).values():
+        for rid in value.get('runs', {}):
+            expected = f"final-{value['taskId']}-{rid}"
+            if base == expected or re.fullmatch(re.escape(expected) + '-late-[0-9a-f]{16}', base):
+                matches.append(value)
+    if len(matches) > 1:
+        raise ValueError('notification identity is ambiguous')
+    return matches[0] if matches else None
+
+
+@contextlib.contextmanager
+def notification_receipts(root, eid):
+    # 发送意图与归档围栏共用 registry → ledger 锁顺序，防止检查后才开始旧项目投递。
+    with registry_transaction(root) as registry:
+        current = notification_task(registry, eid)
+        project = registry.get('projects', {}).get(current.get('projectId')) if current else None
+        if project:
+            assert_active(project)
+        with transaction(root, 'telegram-receipts.json') as receipts:
+            yield receipts
+
 def control_event(reg, e):
     canonical = reg.get('outbox', {}).get(e.get('event_id'))
     if canonical and all((canonical.get(k) == e.get(k) for k in ('task_id', 'run_id', 'route'))):
@@ -73,6 +107,8 @@ def freshness(reg, e):
     t = reg.get('tasks', {}).get(c['task_id'])
     if t is None:
         return (c, 'registry_missing')
+    if inactive(reg.get('projects', {}).get(t.get('projectId'), {})):
+        return (c, 'project_archived')
     if t.get('run_id') != c['run_id']:
         return (c, 'run_replaced')
     if t.get('status') in TERMINAL:
@@ -183,6 +219,11 @@ def enqueue(root, text, source='', event=None):
     eid = e['event_id']
     with registry_inbox(root) as (reg, box):
         canonical = control_event(reg, e)
+        current = reg.get('tasks', {}).get(e.get('task_id'))
+        if current:
+            project = reg.get('projects', {}).get(current.get('projectId'))
+            if project:
+                assert_active(project)
         if canonical:
             for k in ('phase', 'binding', 'status_since', 'created_at', 'visibility'):
                 if k in canonical:

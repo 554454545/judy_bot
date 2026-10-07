@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from execution import runner
+from projects.registry import get
 from storage.registry import ident, timestamp, transaction
 
 
@@ -28,7 +29,7 @@ def bind_project(root, project_id, overrides=None):
         except BlockingIOError as error:
             raise ValueError("该项目正在绑定；先查询登记，不重复启动") from error
         with transaction(root) as registry:
-            project = copy.deepcopy(registry["projects"][project_id])
+            project = copy.deepcopy(get(registry, project_id))
         previous = project.get("executionSettings") or {}
         settings = {
             **service.SETTINGS,
@@ -126,7 +127,7 @@ def launch(root, task_id, run_id, timeout=1800):
         run = task["runs"][rid]
         if run.get("dispatch_requested") or run.get("runner_started"):
             raise ValueError("本次 run 已有派发意图；先查询对账，不重复发送")
-        project = registry["projects"][task["projectId"]]
+        project = get(registry, task["projectId"])
         if project.get("activeExecution") != {"task_id": tid, "run_id": rid}:
             raise ValueError("项目执行身份不同；停止派发")
         settings = copy.deepcopy(project["executionSettings"])
@@ -161,6 +162,7 @@ def launch(root, task_id, run_id, timeout=1800):
     command += " > " + shlex.quote(str(run_directory / "dispatch.log")) + " 2>&1 < /dev/null &"
     with transaction(root) as registry:
         task = registry["tasks"][tid]
+        get(registry, task["projectId"])
         run = task["runs"][rid]
         if task.get("run_id") != rid or task["status"] != "starting" or run.get("dispatch_requested"):
             raise ValueError("run 已变化或已申请派发；不重复发送")
@@ -189,6 +191,8 @@ def result(root, task_id, run_id):
     rid = ident(run_id)
     with transaction(root) as registry:
         task = copy.deepcopy(registry["tasks"].get(tid))
+        if task:
+            get(registry, task["projectId"])
     if not task or rid not in task.get("runs", {}):
         raise ValueError("task/run 尚未登记")
     run = task["runs"][rid]

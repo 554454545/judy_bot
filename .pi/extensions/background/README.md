@@ -1,6 +1,46 @@
 # 后台任务：沿用 Joye 的脚本调用方式
 
+本次 GitHub 快照加载我们编写的项目适配版 `.pi/skills/joye/personal/herdr-workflow/SKILL.md`，即切换到 Joye 原版之前的工作流；来源副本保存在 `herdr-workflow-our-copy/SKILL.md`，启动时只加载前者。保留当前代码及 AGENTS.md 约定，不恢复强制 GitHub Issue 流程。下方原版兼容性调查是历史参考，不描述此快照的启用版本。
+
 前台通过已有 `bash` 调用文件 CLI，完成项目绑定查询、任务登记、交接、真实派发和独立验收。Pi 入口注册原话取证与后台事件接力，不新增模型工具；执行集中在 execution/，通知集中在 notifications/。每项目一个长期 worktree 和原生 Agent session，任务串行执行。仅准备的请求停在 prepare；自动回传、独立验收、主动通知、watchdog 和常驻恢复已接入。十组复杂实验的 30 条真实任务通过最终证据复核，15 次失败尝试单独保留；实际范围见 [re.md](../../../re.md)。不自行合并、提交或推送。
+
+
+## Joye 原版路径适配后的兼容性
+
+以下差异由本地源码、CLI 帮助和仅参数解析的检查确认，不代表真实派发已完成。路径适配仅修改 Skill，不改后台程序或既存登记数据。
+
+| 原版内容 | 本地实际情况 |
+| --- | --- |
+| 直接创建工作区、启动 Agent、发送提示词 | 正式链路通过项目登记、长期 worktree、project-bind 和任务 run；直接操作不会自动建立这些关联或遵循集中 Agent 配置 |
+| 登记规格使用 done_marker/type/route 等字段 | 本地要求 projectId/instruction/scope/acceptance/artifacts，原话由 Pi 扩展取证；不能直接套用原版规格 |
+| register 后直接 start-run | 本地先完成项目绑定和 prepare，再核对交接；start-run 会拒绝未准备的任务 |
+| run TASK RUN -- ABSOLUTE_COMMAND ARGS | 本地仅支持 run TASK RUN [--timeout SECONDS]，目标从项目绑定读取；原版参数在解析时被拒绝 |
+| 主智能体自行 prepare-report/report/ack | 正式链路的结果接力扩展负责投递及签收；不能重复代替其执行 |
+| launchd、adopt-legacy、close-legacy | 本地 watchdog 由 execution/service.py 驱动；本地 CLI 没有这两个历史迁移命令 |
+| 示例使用 jq；报告发布使用 R2 | 当前未安装 jq，项目 R2 凭据未配置；发布脚本自身的 node_modules 目录不存在，未验证发布能力 |
+
+Joye 的核心原则可继续参考，但仅加载原版路径适配后的 Skill，不足以让既有 TG→登记→Herdr→Coding Agent→验收通知流程按原版步骤直接运行。原版中的项目操作与协议调用仍需明确适配；该次调查未恢复旧 Skill 的长操作规程，也未新增模型工具、接口或依赖。
+
+## 项目归档
+
+用户明确要求归档已登记项目时，可调用同一文件 CLI；归档指引已包含在本快照启用的项目适配版 Skill 中；核心实现在 `projects/archive.py`，Codex home 的保全与浏览索引清理在 `execution/codex.py`。没有新增 Pi 模型工具或单独的 Skill。启动白名单已经包含该 Skill。
+
+```bash
+python3 .pi/extensions/background/tasks/task_protocol.py project-archive PROJECT --preview
+python3 .pi/extensions/background/tasks/task_protocol.py project-archive PROJECT
+```
+
+预览只返回实际登记的 ID、目录、原生 UUID、任务/通知数量和占用。执行核对活动任务、监督进程、通知领取/未知签收、绑定启动结果、Herdr 身份、业务子进程及原生写锁；未明确停止工作时拒绝操作。正在打开的 Bot Codex 浏览器须先退出。正常关闭唯一匹配的空闲 Codex 客户端，不强杀进程，不删除锁，也不关闭 Herdr pane、workspace 或 server。
+
+私有档案位于 `.pi/agent/background/archives/<北京时间>_<projectId>_<短ID>/`，包含 `manifest.json`、worktree 成果副本与暂存区、整个原生 Coding Agent home、任务/结果与绑定证据。隐藏、忽略、未跟踪、未提交文件和符号链接均核对保全；不跟随外部链接。先按内容/权限核对并保存，再由 Git 解除原 Bot worktree。原 workspace 项目目录和 Git 工作分支保留；混合的主 Pi 对话/观测、日志、GitHub Issues 和已发 TG 消息保留。
+
+Codex home 整体原子移入档案，原生 UUID、rollout、SQLite 和历史保持原字节，不用修改一列 SQLite 冒充归档。清单保存原目录和新位置；这是 Bot 的私有历史保全，目前不提供归档恢复、自动解封或直接在原生浏览器恢复档案的入口。
+
+项目操作锁与持久归档标记阻止派发/绑定/自动恢复竞争。归档未完成时保持禁入，重调同一命令核对并接续同一份档案；复制中断可续办，保存后成果或暂存区又变化时保留两份内容并停止。完成后只保留按 ID/sourcePath/worktreePath 匹配的归档标记，活动关联退出，旧通知 superseded，浏览派生行与链接移除。任务历史状态不改成“完成”，原始私有登记作为证据保留；`inspect.registry.projects/tasks/outbox` 只显示活动记录，归档项目另见 `registry.archivedProjects`。
+
+再次向已归档项目派发任务必须提示“项目已归档”，不初始化、改名登记、自动恢复或新建 session；同一原目录换 ID 也会被拒绝。`project-archive` 再次调用会校验清单证据并返回同一档案，不重复清理其他项目。
+
+归档/恢复/通知边界的离线回归见 `tests/background/project-archive.py`；真实项目归档及 TG 自然语言链路按用户指定目标另行验收，不能把离线替身当作真实 Codex/Herdr 验收。[Issue #44](https://github.com/554454545/judy_bot/issues/44) 保存需求与单次验证记录。
 
 ## 与 Joye 逐项对照
 
@@ -14,7 +54,7 @@
 | 查询 | inspect 返回 registry、task_hashes；result 返回本次结果 | 保留命令形式；result 只返回有界摘要和证据路径，完整结果留在文件 |
 | hash / ID | digest 的 sorted JSON/bytes SHA256；ID 支持点号和 120 位 | 使用相同算法和字符范围，取消此前自定格式和 80 位限制 |
 | 存储 | cooperating writer 的 flock、原子 replace、fsync、私有文件 | 保留同一原则；数据全部在 bot 下，保留已有 projects/tasks 结构 |
-| 工作流说明 | 既有 herdr-workflow Skill | 适配已有 Joye 副本并加载；没有另外新写 Skill |
+| 工作流说明 | 既有 herdr-workflow Skill | 加载我们编写的项目适配版；来源副本单独保留且不重复加载 |
 | 输入身份 | relay-notify.ts 用真实消息对象、getBranch、appendEntry | 原话保留真实消息对象；relay 使用官方 custom message 记录内部控制身份，不增加工具 |
 | Worktree | 原版通过 Herdr 创建 | 用户指定长期 worktree，保留本地 Git 创建/复用；Herdr 绑定其实际目录 |
 | Agent / task-run / 签收 | Herdr、runner、outbox/inbox、relay、watchdog | 执行、通知、watchdog 已接入；Pi 0.84.1 用 sendMessage 唤醒验收，不依赖 Joye 的 core 补丁或 task_event_finish 工具 |
@@ -94,7 +134,7 @@ CLI 的 --root 支持相对于调用方工作目录的路径；入口立即解�
 
 result 只返回状态、最多 1200 字符的业务摘要和私有证据路径，不返回 worker 历史、完整终端日志或 diff。前台按 acceptance 读取具体产物并执行检查，写匹配 task/run 的私有 review，再 verify。成功验收释放项目占用；真实失败保持 blocked，不自动重试。
 
-验收读取前先列当前任务范围内的实际文件，或核对本 run 业务产物；不能按修改阶段猜测试文件名。新增测试可以保留在原测试文件中。具体调用规则仍在已有 herdr-workflow Skill，不另设工具或工作流。
+验收读取前先列当前任务范围内的实际文件，或核对本 run 业务产物；不能按修改阶段猜测试文件名。新增测试可以保留在原测试文件中。项目调用规则见启用的 herdr-workflow Skill。
 
 隔离验证使用 `python3 .../task_protocol.py --root PRIVATE_DIRECTORY inspect`；--root 放在子命令之前。正文放私有 JSON 文件，不通过 Shell 参数拼接；文件/参数里的引号、中文、换行和反引号保持原值。
 
@@ -118,7 +158,7 @@ update 使用同一登记锁比较 expected-hash，保存补充原话/旧需求�
 
 本地模块与原话检查在 tests/background/preparation.py、worktree-management.py、request-recording.py、request-source.mjs；安装版 Pi 的 bash/session 与 CLI 验证在 pi-cli.mjs（替代旧 pi-tools.mjs）。真实模型的隔离 TG 模拟入口为 frontend-cli-flow.mjs，结果和完整请求保存在该次 session 私有目录；不发送真实 Telegram 消息，不启动 Herdr。测试与现有运行实例重载是不同事实，证据分别记录。
 
-新项目首次接入回归在 tests/background/project-onboarding.py；真实全链路入口为 project-onboarding-live.mjs。首次从两个获准空目录开始，交替完成创建、存档与机制修改，核对独立 UUID、CODEX_HOME 和永久会话续用。失败后 `--resume-bindings` 仅复用上一尝试的真实项目绑定，前台重新开 session、业务另用新目录，保留旧结果。`--repeat-only --business-directory DIR` 原样重发既有需求；`--clarification-only` 验证先澄清、穿插问答、确认后仅准备。两者沿用原绑定。驱动的 TG 用户入站为构造消息，前台模型、Herdr/Codex、独立验收和 Telegram API 投递为真实调用；不能冒充手机入站或手机接收回执。详细过程与通过范围记录在对应 Issue，原始证据留在私有 verification/project-onboarding/。
+新项目首次接入回归在 tests/background/project-onboarding.py；真实全链路入口为 project-onboarding-live.mjs。首次从两个获准空目录开始，交替完成创建、存档与机制修改，核对独立 UUID、CODEX_HOME 和永久会话续用。失败后 `--resume-bindings` 仅复用上一尝试的真实项目绑定，前台重新开 session、业务另用新目录，保留旧结果。`--repeat-only --business-directory DIR` 原样重发既有需求；`--clarification-only` 验证先澄清、穿插问答、确认后仅准备。两者沿用原绑定。驱动的 TG 用户入站为构造消息，前台模型、Herdr/Codex、独立验收和 Telegram API 投递为真实调用；不能冒充手机入站或手机接收回执。原始过程与验收证据留在私有 verification/project-onboarding/。
 
 ## 执行实现与独立入口
 
@@ -180,7 +220,7 @@ python3 .pi/extensions/background/execution/runner.py --root "$VERIFICATION/back
 python3 .pi/extensions/background/execution/runner.py --root "$VERIFICATION/background" inspect
 ```
 
-不要自动重发已有 run；重复派发被拒绝，未知发送保留现场。service.py 仅恢复已登记原 UUID；状态不明时保留现场，发送 unknown 不自动重发。实际覆盖以 re.md 的证据为准。start.sh 已显式加载已有 Joye herdr-workflow Skill；本次更新它的当前阶段说明，没有另加 Skill 或开关。前台通过 CLI 派发，不直接控制 Agent。
+不要自动重发已有 run；重复派发被拒绝，未知发送保留现场。service.py 仅恢复已登记原 UUID；状态不明时保留现场，发送 unknown 不自动重发。实际覆盖以 re.md 的证据为准。start.sh 已显式加载我们编写的 herdr-workflow 项目适配版。前台通过 CLI 派发，不直接控制 Agent。
 
 ## Bot 专用 Herdr 与原 Codex 会话
 

@@ -43,7 +43,7 @@ const python = code => JSON.parse(execFileSync("python3", ["-c", code], {
 const snapshot = directory => python(`import json,sys; sys.path.insert(0, ${JSON.stringify(path.join(bot, ".pi/extensions/background"))}); from execution.runner import worktree_snapshot; print(json.dumps(worktree_snapshot(${JSON.stringify(directory)})))`);
 const sourceBefore = snapshot(project.sourcePath);
 const worktreeBefore = snapshot(project.worktreePath);
-const protectedFiles = ["start.sh", "AGENTS.md", "plan.md", ".pi/agent/auth.json", ".pi/agent/models.json", ".pi/agent/settings.json", ".pi/agent/background/registry.json", ".pi/agent/background/codex/test/config.toml"];
+const protectedFiles = ["start.sh", "AGENTS.md", ".pi/agent/auth.json", ".pi/agent/models.json", ".pi/agent/settings.json", ".pi/agent/background/registry.json", ".pi/agent/background/codex/test/config.toml"];
 const protectedHashes = Object.fromEntries(protectedFiles.map(file => [file, digest(path.join(bot, file))]));
 const cli = (...args) => JSON.parse(execFileSync("python3", [protocol, "--root", root, ...args], {
   encoding: "utf8",
